@@ -26,6 +26,10 @@ sleep 1
 
 ## Verifica root
 if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo &>/dev/null; then
+        echo -e "$amarelo Reexecutando com sudo...$reset"
+        exec sudo bash "$0" "$@"
+    fi
     echo -e "$vermelho Este script precisa ser executado como root.$reset"
     exit 1
 fi
