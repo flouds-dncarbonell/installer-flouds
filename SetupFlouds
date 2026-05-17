@@ -1,0 +1,1447 @@
+#!/bin/bash
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+##                           FLOUDS INSTALLER                              ##
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+versao="1.0.0"
+
+## Cores
+amarelo="\e[33m"
+verde="\e[32m"
+branco="\e[97m"
+bege="\e[93m"
+vermelho="\e[91m"
+reset="\e[0m"
+
+## Diretório de dados
+home_directory="$HOME"
+dados_vps="${home_directory}/dados_vps/dados_vps"
+dados_portainer_file="${home_directory}/dados_vps/dados_portainer"
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ASCII ART
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+nome_instalador() {
+    clear
+    echo ""
+    echo -e "$branco  ███████╗██╗      ██████╗ ██╗   ██╗██████╗ ███████╗$reset"
+    echo -e "$branco  ██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗██╔════╝$reset"
+    echo -e "$branco  █████╗  ██║     ██║   ██║██║   ██║██║  ██║███████╗$reset"
+    echo -e "$branco  ██╔══╝  ██║     ██║   ██║██║   ██║██║  ██║╚════██║$reset"
+    echo -e "$branco  ██║     ███████╗╚██████╔╝╚██████╔╝██████╔╝███████║$reset"
+    echo -e "$branco  ╚═╝     ╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝$reset"
+    echo ""
+    echo -e "$amarelo                   Instalador v$versao$reset"
+    echo ""
+}
+
+nome_menu() {
+    clear
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo -e "$branco              ███╗   ███╗███████╗███╗   ██╗██╗   ██╗    ██████╗ ███████╗$reset"
+    echo -e "$branco              ████╗ ████║██╔════╝████╗  ██║██║   ██║    ██╔══██╗██╔════╝$reset"
+    echo -e "$branco              ██╔████╔██║█████╗  ██╔██╗ ██║██║   ██║    ██║  ██║█████╗  $reset"
+    echo -e "$branco              ██║╚██╔╝██║██╔══╝  ██║╚██╗██║██║   ██║    ██║  ██║██╔══╝  $reset"
+    echo -e "$branco              ██║ ╚═╝ ██║███████╗██║ ╚████║╚██████╔╝    ██████╔╝███████╗$reset"
+    echo -e "$branco              ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝ ╚═════╝     ╚═════╝ ╚══════╝$reset"
+    echo ""
+    echo -e "$branco         ███████╗███████╗██████╗ ██████╗  █████╗ ███╗   ███╗███████╗███╗   ██╗████████╗ █████╗ ███████╗$reset"
+    echo -e "$branco         ██╔════╝██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗ ████║██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔════╝$reset"
+    echo -e "$branco         █████╗  █████╗  ██████╔╝██████╔╝███████║██╔████╔██║█████╗  ██╔██╗ ██║   ██║   ███████║███████╗$reset"
+    echo -e "$branco         ██╔══╝  ██╔══╝  ██╔══██╗██╔══██╗██╔══██║██║╚██╔╝██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██║╚════██║$reset"
+    echo -e "$branco         ██║     ███████╗██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║███████╗██║ ╚████║   ██║   ██║  ██║███████║$reset"
+    echo -e "$branco         ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚══════╝$reset"
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo                         Flouds Installer v$versao$reset"
+    echo ""
+}
+
+nome_traefik_portainer() {
+    clear
+    echo ""
+    echo -e "$branco          ████████╗██████╗  █████╗ ███████╗███████╗██╗██╗  ██╗    ██╗$reset"
+    echo -e "$branco          ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██╔════╝██║██║ ██╔╝    ██║$reset"
+    echo -e "$branco             ██║   ██████╔╝███████║█████╗  █████╗  ██║█████╔╝     ██║$reset"
+    echo -e "$branco             ██║   ██╔══██╗██╔══██║██╔══╝  ██╔══╝  ██║██╔═██╗     ╚═╝$reset"
+    echo -e "$branco             ██║   ██║  ██║██║  ██║███████╗██║     ██║██║  ██╗     ██╗$reset"
+    echo -e "$branco             ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝     ╚═╝╚═╝  ╚═╝     ╚═╝$reset"
+    echo ""
+    echo -e "$branco      ██████╗  ██████╗ ██████╗ ████████╗ █████╗ ██╗███╗   ██╗███████╗██████╗$reset"
+    echo -e "$branco      ██╔══██╗██╔═══██╗██╔══██╗╚══██╔══╝██╔══██╗██║████╗  ██║██╔════╝██╔══██╗$reset"
+    echo -e "$branco      ██████╔╝██║   ██║██████╔╝   ██║   ███████║██║██╔██╗ ██║█████╗  ██████╔╝$reset"
+    echo -e "$branco      ██╔═══╝ ██║   ██║██╔══██╗   ██║   ██╔══██║██║██║╚██╗██║██╔══╝  ██╔══██╗$reset"
+    echo -e "$branco      ██║     ╚██████╔╝██║  ██║   ██║   ██║  ██║██║██║ ╚████║███████╗██║  ██║$reset"
+    echo -e "$branco      ╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝$reset"
+    echo ""
+    echo ""
+}
+
+nome_fzap() {
+    clear
+    echo ""
+    echo -e "$branco         ███████╗███████╗ █████╗ ██████╗ $reset"
+    echo -e "$branco         ██╔════╝╚══███╔╝██╔══██╗██╔══██╗$reset"
+    echo -e "$branco         █████╗    ███╔╝ ███████║██████╔╝$reset"
+    echo -e "$branco         ██╔══╝   ███╔╝  ██╔══██║██╔═══╝ $reset"
+    echo -e "$branco         ██║     ███████╗██║  ██║██║     $reset"
+    echo -e "$branco         ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝     $reset"
+    echo ""
+    echo ""
+}
+
+instalando_msg() {
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=   $branco ██╗███╗   ██╗███████╗████████╗ █████╗ ██╗      █████╗ ███╗   ██╗██████╗  ██████╗   $amarelo  =$reset"
+    echo -e "$amarelo=   $branco ██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██╔══██╗████╗  ██║██╔══██╗██╔═══██╗  $amarelo =$reset"
+    echo -e "$amarelo=   $branco ██║██╔██╗ ██║███████╗   ██║   ███████║██║     ███████║██╔██╗ ██║██║  ██║██║   ██║  $amarelo =$reset"
+    echo -e "$amarelo=   $branco ██║██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██╔══██║██║╚██╗██║██║  ██║██║   ██║  $amarelo =$reset"
+    echo -e "$amarelo=   $branco ██║██║ ╚████║███████║   ██║   ██║  ██║███████╗██║  ██║██║ ╚████║██████╔╝╚██████╔╝  $amarelo =$reset"
+    echo -e "$amarelo=   $branco ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═══╝╚═════╝  ╚═════╝   $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+}
+
+instalado_msg() {
+    clear
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo -e "$verde  ██╗ ██╗███╗   ██╗███████╗████████╗ █████╗ ██╗      █████╗ ██████╗  ██████╗  ██╗ ██╗$reset"
+    echo -e "$verde  ╚██╗██╔╝████╗  ██║██╔════╝╚══██╔══╝██╔══██╗██║     ██╔══██╗██╔══██╗██╔═══██╗ ██╔╝╚██╗$reset"
+    echo -e "$verde   ╚███╔╝ ██╔██╗ ██║███████╗   ██║   ███████║██║     ███████║██║  ██║██║   ██║██╔╝  ╚██╗$reset"
+    echo -e "$verde   ██╔██╗ ██║╚██╗██║╚════██║   ██║   ██╔══██║██║     ██╔══██║██║  ██║██║   ██║╚██╗  ██╔╝$reset"
+    echo -e "$verde  ██╔╝ ██╗██║ ╚████║███████║   ██║   ██║  ██║███████╗██║  ██║██████╔╝╚██████╔╝ ╚██╗██╔╝$reset"
+    echo -e "$verde  ╚═╝  ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝   ╚══╝╚═╝ $reset"
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+}
+
+erro_msg() {
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=                     $vermelho███████╗██████╗ ██████╗  ██████╗                              $amarelo=$reset"
+    echo -e "$amarelo=                     $vermelho██╔════╝██╔══██╗██╔══██╗██╔═══██╗                             $amarelo=$reset"
+    echo -e "$amarelo=                     $vermelho█████╗  ██████╔╝██████╔╝██║   ██║                             $amarelo=$reset"
+    echo -e "$amarelo=                     $vermelho██╔══╝  ██╔══██╗██╔══██╗██║   ██║                             $amarelo=$reset"
+    echo -e "$amarelo=                     $vermelho███████╗██║  ██║██║  ██║╚██████╔╝                             $amarelo=$reset"
+    echo -e "$amarelo=                     $vermelho╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝                              $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+}
+
+nome_finalizado() {
+    clear
+    echo ""
+    echo -e "$branco   ███████╗██╗███╗   ██╗ █████╗ ██╗     ██╗███████╗ █████╗ ██████╗  ██████╗ $reset"
+    echo -e "$branco   ██╔════╝██║████╗  ██║██╔══██╗██║     ██║╚══███╔╝██╔══██╗██╔══██╗██╔═══██╗$reset"
+    echo -e "$branco   █████╗  ██║██╔██╗ ██║███████║██║     ██║  ███╔╝ ███████║██║  ██║██║   ██║$reset"
+    echo -e "$branco   ██╔══╝  ██║██║╚██╗██║██╔══██║██║     ██║ ███╔╝  ██╔══██║██║  ██║██║   ██║$reset"
+    echo -e "$branco   ██║     ██║██║ ╚████║██║  ██║███████╗██║███████╗██║  ██║██████╔╝╚██████╔╝$reset"
+    echo -e "$branco   ╚═╝     ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝  ╚═╝╚═════╝  ╚═════╝ $reset"
+    echo ""
+    echo ""
+}
+
+preencha_as_info() {
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=                       $branco Preencha as informações solicitadas abaixo                         $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+}
+
+conferindo_as_info() {
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=                         $branco Verifique se os dados abaixo estão certos                        $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+}
+
+guarde_os_dados_msg() {
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=               $branco Guarde todos os dados abaixo para evitar futuros transtornos               $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## FUNÇÕES UTILITÁRIAS
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Carrega dados da VPS salva
+dados() {
+    if [ -f "$dados_vps" ]; then
+        nome_servidor=$(grep "Nome do Servidor:" "$dados_vps" | awk -F': ' '{print $2}')
+        nome_rede_interna=$(grep "Rede interna:" "$dados_vps" | awk -F': ' '{print $2}')
+    fi
+}
+
+## Gera string aleatória segura
+gerar_token() {
+    local tamanho="${1:-32}"
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c "$tamanho"
+}
+
+## Oculta senha para exibição
+esconder_senha() {
+    local senha="$1"
+    local visivel=4
+    local tamanho=${#senha}
+    if [ "$tamanho" -le "$visivel" ]; then
+        SENHAOCULTA="****"
+    else
+        SENHAOCULTA="${senha:0:$visivel}$(printf '*%.0s' $(seq 1 $((tamanho - visivel))))"
+    fi
+}
+
+## Valida senha
+validar_senha() {
+    local senha="$1"
+    local min="${2:-12}"
+    if [ ${#senha} -lt "$min" ]; then
+        echo -e "$vermelho  Senha muito curta. Mínimo $min caracteres.$reset"
+        return 1
+    fi
+    return 0
+}
+
+## Verifica se stack já existe no Swarm
+verificar_stack() {
+    local nome_stack="$1"
+    if docker stack ls --format "{{.Name}}" 2>/dev/null | grep -q "^${nome_stack}$"; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " A stack $amarelo${nome_stack}$reset já está instalada."
+        echo -e " Para reinstalar, remova a stack no Portainer e tente novamente."
+        echo ""
+        echo -e " Voltando ao menu em 8 segundos..."
+        sleep 8
+        return 0
+    fi
+    return 1
+}
+
+## Verifica recursos mínimos (vCPU e GB RAM)
+recursos() {
+    local vcpu_req=$1
+    local ram_req=$2
+
+    local vcpu_disp
+    local ram_disp
+
+    vcpu_disp=$(nproc 2>/dev/null || echo 1)
+    ram_disp=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}')
+    ram_disp=${ram_disp:-1}
+
+    if [ "$vcpu_disp" -lt "$vcpu_req" ] || [ "$ram_disp" -lt "$ram_req" ]; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " Recursos insuficientes para esta instalação."
+        echo -e " Necessário: $amarelo${vcpu_req} vCPU$reset e $amarelo${ram_req}GB RAM$reset"
+        echo -e " Disponível: $amarelo${vcpu_disp} vCPU$reset e $amarelo${ram_disp}GB RAM$reset"
+        echo ""
+        echo -e " Deseja continuar mesmo assim? (y/n): "
+        read -r escolha
+        if [ "$escolha" != "y" ] && [ "$escolha" != "Y" ]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+## Verifica se Docker, Portainer e Traefik estão instalados
+verificar_docker_e_portainer_traefik() {
+    if ! command -v docker &> /dev/null; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " Docker não encontrado. Instale a opção $amarelo[1] Traefik & Portainer$reset primeiro."
+        echo ""
+        echo -e " Voltando ao menu em 5 segundos..."
+        sleep 5
+        return 1
+    fi
+
+    if ! docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "portainer"; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " Portainer não encontrado. Instale a opção $amarelo[1] Traefik & Portainer$reset primeiro."
+        echo ""
+        echo -e " Voltando ao menu em 5 segundos..."
+        sleep 5
+        return 1
+    fi
+
+    if ! docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "traefik"; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " Traefik não encontrado. Instale a opção $amarelo[1] Traefik & Portainer$reset primeiro."
+        echo ""
+        echo -e " Voltando ao menu em 5 segundos..."
+        sleep 5
+        return 1
+    fi
+
+    return 0
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## PORTAINER API
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+criar_arquivo_portainer() {
+    [ -f "$dados_portainer_file" ] && rm "$dados_portainer_file"
+
+    clear
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=                     $branco Credenciais do Portainer necessárias                                $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    echo ""
+
+    echo -e "$amarelo Passo 1/3$reset"
+    read -rp "URL do Portainer (ex: portainer.seudominio.com.br): " PORTAINER_URL
+    echo ""
+
+    echo -e "$amarelo Passo 2/3$reset"
+    read -rp "Usuário do Portainer (ex: admin): " USUARIO
+    echo ""
+
+    echo -e "$amarelo Passo 3/3$reset"
+    echo -e "$branco Obs: A senha não aparecerá ao digitar$reset"
+    read -rs -p "Senha do Portainer: " SENHA
+    echo ""
+
+    echo -e "[ PORTAINER ]\nDominio do portainer: $PORTAINER_URL\n\nUsuario: $USUARIO\n\nSenha: $SENHA\n\nToken: " > "$dados_portainer_file"
+}
+
+verificar_campos_portainer() {
+    local url user pass
+    url=$(grep "Dominio do portainer:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+    user=$(grep "Usuario:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+    pass=$(grep "Senha:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+
+    if [ -z "$url" ] || [ -z "$user" ] || [ -z "$pass" ]; then
+        criar_arquivo_portainer
+    fi
+}
+
+verificar_arquivo_portainer() {
+    if [ ! -f "$dados_portainer_file" ]; then
+        criar_arquivo_portainer
+    else
+        verificar_campos_portainer
+    fi
+}
+
+## Deploy da stack via API do Portainer
+deploy() {
+    local STACK_NAME="$1"
+
+    echo ""
+    echo -e "$amarelo Iniciando deploy via Portainer API...$reset"
+    echo ""
+
+    ## Pega credenciais salvas
+    sed -i 's|Dominio do portainer: https://||' "$dados_portainer_file" 2>/dev/null
+
+    PORTAINER_URL=$(grep "Dominio do portainer:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+    USUARIO=$(grep "Usuario:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+    SENHA=$(grep "Senha:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+
+    echo -e "1/6 - Credenciais carregadas"
+
+    ## Obtém token JWT
+    local tentativa=0
+    TOKEN=""
+    while [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; do
+        tentativa=$((tentativa + 1))
+        TOKEN=$(curl -k -s -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"username\":\"$USUARIO\",\"password\":\"$SENHA\"}" \
+            "https://$PORTAINER_URL/api/auth" | jq -r .jwt 2>/dev/null)
+
+        if [ "$tentativa" -ge 5 ]; then
+            echo -e "2/6 - $vermelho[ ERRO ] Falha ao obter token do Portainer após 5 tentativas$reset"
+            echo -e "      Verifique as credenciais e tente novamente."
+            sleep 3
+            criar_arquivo_portainer
+            return 1
+        fi
+        [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ] && sleep 3
+    done
+    echo -e "2/6 - Token obtido"
+
+    ## Salva token
+    sed -i "s|Token: .*|Token: $TOKEN|" "$dados_portainer_file"
+
+    ## Pega Endpoint ID
+    ENDPOINT_ID=$(curl -k -s -X GET \
+        -H "Authorization: Bearer $TOKEN" \
+        "https://$PORTAINER_URL/api/endpoints" | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null)
+    echo -e "3/6 - Endpoint ID: $bege$ENDPOINT_ID$reset"
+
+    ## Pega Swarm ID
+    SWARM_ID=$(curl -k -s -X GET \
+        -H "Authorization: Bearer $TOKEN" \
+        "https://$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/swarm" | jq -r .ID 2>/dev/null)
+    echo -e "4/6 - Swarm ID obtido"
+
+    ## Verifica Swarm
+    if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" != "active" ]; then
+        echo -e "5/6 - $vermelho[ ERRO ] Docker Swarm não está ativo$reset"
+        return 1
+    fi
+    echo -e "5/6 - Docker Swarm ativo"
+
+    ## Faz o deploy
+    local erro_output response_output http_code response_body
+    erro_output=$(mktemp)
+    response_output=$(mktemp)
+
+    http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X POST \
+        -H "Authorization: Bearer $TOKEN" \
+        -F "Name=$STACK_NAME" \
+        -F "file=@$(pwd)/${STACK_NAME}.yaml" \
+        -F "SwarmID=$SWARM_ID" \
+        -F "endpointId=$ENDPOINT_ID" \
+        "https://$PORTAINER_URL/api/stacks/create/swarm/file" 2>"$erro_output")
+
+    response_body=$(cat "$response_output")
+
+    if [ "$http_code" -eq 200 ] && echo "$response_body" | grep -q '"Id"'; then
+        echo -e "6/6 - $verde[ OK ] Stack $bege$STACK_NAME$verde deployada com sucesso!$reset"
+    else
+        echo -e "6/6 - $vermelho[ ERRO ] Falha no deploy (HTTP $http_code)$reset"
+        echo -e "      $(echo "$response_body" | jq -r '.message // .details // .' 2>/dev/null)"
+    fi
+
+    rm -f "$erro_output" "$response_output"
+    echo ""
+}
+
+requisitar_outra_instalacao() {
+    echo ""
+    echo -e "$amarelo====================================================================================================$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo=                   $branco Deseja instalar outra ferramenta? (Y/N)                                $amarelo=$reset"
+    echo -e "$amarelo=                                                                                                  =$reset"
+    echo -e "$amarelo====================================================================================================$reset"
+    echo ""
+    read -rp "Resposta: " continuar
+    if [ "$continuar" = "Y" ] || [ "$continuar" = "y" ]; then
+        return
+    else
+        nome_finalizado
+        echo -e "$branco Obrigado por usar o Flouds Installer! Até mais.$reset"
+        echo ""
+        sleep 2
+        exit 0
+    fi
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## DETECÇÃO E REAPROVEITAMENTO DE INFRAESTRUTURA
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+_tem_portainer() {
+    docker ps -a --format "{{.Names}}" 2>/dev/null | grep -qi "portainer"
+}
+
+_tem_traefik() {
+    docker ps -a --format "{{.Names}}" 2>/dev/null | grep -qi "traefik"
+}
+
+_usar_existentes() {
+    clear
+    nome_traefik_portainer
+
+    echo ""
+    echo -e "$verde  ✔ Traefik e Portainer já detectados neste servidor.$reset"
+    echo ""
+    echo -e " Informe os dados do ambiente existente para que as demais ferramentas"
+    echo -e " possam ser instaladas utilizando a infraestrutura atual."
+    echo ""
+
+    while true; do
+        echo -e "$amarelo Passo 1/3$reset"
+        echo -en "$amarelo Domínio do Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo ""
+
+        echo -e "$amarelo Passo 2/3$reset"
+        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo ""
+
+        echo -e "$amarelo Passo 3/3$reset"
+        echo -en "$amarelo E-mail SSL configurado no Traefik: $reset" && read -r email_ssl
+        echo ""
+
+        clear
+        nome_traefik_portainer
+        conferindo_as_info
+        echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
+        echo ""
+        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo ""
+        echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
+        echo ""
+
+        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+
+        clear
+        nome_traefik_portainer
+        preencha_as_info
+    done
+
+    mkdir -p dados_vps
+
+    {
+        echo "[ SERVIDOR ]"
+        echo "Nome do Servidor: Flouds"
+        echo "Rede interna: $nome_rede_interna"
+        echo "Email SSL: $email_ssl"
+    } > dados_vps/dados_vps
+
+    criar_arquivo_portainer
+
+    clear
+    instalado_msg
+    echo -e "$verde [ TRAEFIK & PORTAINER - REAPROVEITADO ]$reset"
+    echo ""
+    echo -e "$bege Infraestrutura existente registrada com sucesso!$reset"
+    echo ""
+    echo -e "$amarelo URL do Portainer:$branco https://$url_portainer$reset"
+    echo ""
+
+    requisitar_outra_instalacao
+}
+
+_instalar_apenas_traefik() {
+    clear
+    nome_traefik_portainer
+    preencha_as_info
+
+    while true; do
+        echo -e "$amarelo Passo 1/3$reset"
+        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo ""
+
+        echo -e "$amarelo Passo 2/3$reset"
+        echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && read -r email_ssl
+        echo ""
+
+        echo -e "$amarelo Passo 3/3$reset"
+        echo -en "$amarelo Domínio do Portainer existente (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo ""
+
+        clear
+        nome_traefik_portainer
+        conferindo_as_info
+        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo ""
+        echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
+        echo ""
+        echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
+        echo ""
+
+        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+
+        clear
+        nome_traefik_portainer
+        preencha_as_info
+    done
+
+    clear
+    instalando_msg
+
+    cd /root || exit 1
+    mkdir -p dados_vps
+
+    {
+        echo "[ SERVIDOR ]"
+        echo "Nome do Servidor: Flouds"
+        echo "Rede interna: $nome_rede_interna"
+        echo "Email SSL: $email_ssl"
+    } > dados_vps/dados_vps
+
+    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
+    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+    if [ "$SWARM_STATUS" != "active" ]; then
+        docker swarm init > /dev/null 2>&1
+    fi
+    echo -e "$verde  ✔ Swarm OK$reset"
+    echo ""
+
+    echo -e "$amarelo• Criando rede $nome_rede_interna...$reset"
+    docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1
+    echo -e "$verde  ✔ Rede criada$reset"
+    echo ""
+
+    echo -e "$amarelo• Gerando stack YAML...$reset"
+    cat > traefik_only.yaml << EOF
+version: "3.7"
+
+services:
+
+  traefik:
+    image: traefik:latest
+    command:
+      - --api.dashboard=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${nome_rede_interna}
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencryptresolver.acme.email=${email_ssl}
+      - --certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json
+      - --log.level=ERROR
+      - --log.format=common
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certificates:/etc/traefik/letsencrypt
+    networks:
+      - ${nome_rede_interna}
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+      - target: 443
+        published: 443
+        mode: host
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
+        - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
+        - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
+        - traefik.http.routers.http-catchall.entrypoints=web
+        - traefik.http.routers.http-catchall.middlewares=redirect-https@docker
+        - traefik.http.routers.http-catchall.priority=1
+        - traefik.http.services.traefik.loadbalancer.server.port=8080
+
+volumes:
+  traefik_certificates:
+    external: true
+    name: traefik_certificates
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    name: ${nome_rede_interna}
+EOF
+    echo -e "$verde  ✔ YAML gerado$reset"
+    echo ""
+
+    echo -e "$amarelo• Criando volume...$reset"
+    docker volume create traefik_certificates > /dev/null 2>&1
+    echo -e "$verde  ✔ Volume criado$reset"
+    echo ""
+
+    echo -e "$amarelo• Deployando Traefik...$reset"
+    docker stack deploy -c traefik_only.yaml traefik_portainer --with-registry-auth
+    echo ""
+
+    sleep 5
+
+    criar_arquivo_portainer
+
+    clear
+    instalado_msg
+    guarde_os_dados_msg
+    echo -e "$verde [ TRAEFIK INSTALADO ]$reset"
+    echo ""
+    echo -e "$amarelo URL do Portainer:$branco https://$url_portainer$reset"
+    echo ""
+
+    requisitar_outra_instalacao
+}
+
+_instalar_apenas_portainer() {
+    clear
+    nome_traefik_portainer
+    preencha_as_info
+
+    while true; do
+        echo -e "$amarelo Passo 1/5$reset"
+        echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo ""
+
+        echo -e "$amarelo Passo 2/5$reset"
+        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        echo ""
+
+        while true; do
+            echo -e "$amarelo Passo 3/5$reset"
+            echo -e "$bege --> Mínimo 12 caracteres$reset"
+            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
+            echo ""
+            validar_senha "$pass_portainer" 12 && break
+        done
+
+        echo -e "$amarelo Passo 4/5$reset"
+        echo -e "$bege --> Deve ser a mesma rede que o Traefik existente usa$reset"
+        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo ""
+
+        echo -e "$amarelo Passo 5/5$reset"
+        echo -en "$amarelo E-mail para certificado SSL: $reset" && read -r email_ssl
+        echo ""
+
+        clear
+        nome_traefik_portainer
+        conferindo_as_info
+        echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
+        echo ""
+        echo -e "$amarelo Usuário:$branco $user_portainer$reset"
+        echo ""
+        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo ""
+        echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
+        echo ""
+
+        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+
+        clear
+        nome_traefik_portainer
+        preencha_as_info
+    done
+
+    clear
+    instalando_msg
+
+    cd /root || exit 1
+    mkdir -p dados_vps
+
+    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | sed 's/\$/\$\$/g')
+
+    {
+        echo "[ SERVIDOR ]"
+        echo "Nome do Servidor: Flouds"
+        echo "Rede interna: $nome_rede_interna"
+        echo "Email SSL: $email_ssl"
+    } > dados_vps/dados_vps
+
+    {
+        echo "[ PORTAINER ]"
+        echo "Dominio do portainer: $url_portainer"
+        echo ""
+        echo "Usuario: $user_portainer"
+        echo ""
+        echo "Senha: $pass_portainer"
+        echo ""
+        echo "Token: "
+    } > dados_vps/dados_portainer
+
+    echo -e "$verde  ✔ Dados salvos$reset"
+    echo ""
+
+    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
+    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+    if [ "$SWARM_STATUS" != "active" ]; then
+        docker swarm init > /dev/null 2>&1
+    fi
+    echo -e "$verde  ✔ Swarm OK$reset"
+    echo ""
+
+    echo -e "$amarelo• Gerando stack YAML...$reset"
+    cat > portainer_only.yaml << EOF
+version: "3.7"
+
+services:
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - ${nome_rede_interna}
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.routers.portainer.tls=true
+        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.portainer.service=portainer
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+
+volumes:
+  portainer_data:
+    external: true
+    name: portainer_data
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    name: ${nome_rede_interna}
+EOF
+    echo -e "$verde  ✔ YAML gerado$reset"
+    echo ""
+
+    echo -e "$amarelo• Criando volume...$reset"
+    docker volume create portainer_data > /dev/null 2>&1
+    echo -e "$verde  ✔ Volume criado$reset"
+    echo ""
+
+    echo -e "$amarelo• Deployando Portainer...$reset"
+    docker stack deploy -c portainer_only.yaml traefik_portainer --with-registry-auth
+    echo ""
+
+    sleep 5
+
+    instalado_msg
+    guarde_os_dados_msg
+    echo -e "$verde [ PORTAINER INSTALADO ]$reset"
+    echo ""
+    echo -e "$amarelo URL do Portainer:$branco https://$url_portainer$reset"
+    echo ""
+    echo -e "$amarelo Usuário:$branco $user_portainer$reset"
+    echo ""
+    echo -e "$amarelo Senha:$branco $pass_portainer$reset"
+    echo ""
+    echo -e "$bege ⚠ Aguarde 1-2 minutos para o Portainer iniciar e configurar sua senha de admin.$reset"
+    echo ""
+
+    requisitar_outra_instalacao
+}
+
+verificar_infraestrutura_existente() {
+    local tem_portainer=false
+    local tem_traefik=false
+
+    _tem_portainer && tem_portainer=true
+    _tem_traefik && tem_traefik=true
+
+    if $tem_portainer && $tem_traefik; then
+        clear
+        nome_traefik_portainer
+        echo ""
+        echo -e "$amarelo Atenção: Traefik e Portainer já detectados neste servidor.$reset"
+        echo ""
+        echo -e " $amarelo[1]$reset Reaproveitar infraestrutura existente"
+        echo -e " $amarelo[2]$reset Reinstalar do zero"
+        echo ""
+        read -rp " Escolha: " escolha
+        case "$escolha" in
+            1) _usar_existentes; return 1 ;;
+            2) return 0 ;;
+            *) return 1 ;;
+        esac
+
+    elif $tem_portainer && ! $tem_traefik; then
+        clear
+        nome_traefik_portainer
+        echo ""
+        echo -e "$amarelo Atenção: Portainer detectado, mas Traefik não encontrado.$reset"
+        echo ""
+        echo -e " $amarelo[1]$reset Instalar apenas o Traefik"
+        echo -e " $amarelo[2]$reset Reinstalar tudo do zero (remova o Portainer manualmente antes)"
+        echo ""
+        read -rp " Escolha: " escolha
+        case "$escolha" in
+            1) _instalar_apenas_traefik; return 1 ;;
+            2) return 0 ;;
+            *) return 1 ;;
+        esac
+
+    elif ! $tem_portainer && $tem_traefik; then
+        clear
+        nome_traefik_portainer
+        echo ""
+        echo -e "$amarelo Atenção: Traefik detectado, mas Portainer não encontrado.$reset"
+        echo ""
+        echo -e " $amarelo[1]$reset Instalar apenas o Portainer"
+        echo -e " $amarelo[2]$reset Reinstalar tudo do zero (remova o Traefik manualmente antes)"
+        echo ""
+        read -rp " Escolha: " escolha
+        case "$escolha" in
+            1) _instalar_apenas_portainer; return 1 ;;
+            2) return 0 ;;
+            *) return 1 ;;
+        esac
+    fi
+
+    return 0
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## [1] TRAEFIK & PORTAINER
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+ferramenta_traefik_e_portainer() {
+
+    recursos 1 1 && return
+
+    verificar_infraestrutura_existente || return
+
+    clear
+    nome_traefik_portainer
+    preencha_as_info
+
+    while true; do
+
+        echo -e "$amarelo Passo 1/5$reset"
+        echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo ""
+
+        echo -e "$amarelo Passo 2/5$reset"
+        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        echo ""
+
+        while true; do
+            echo -e "$amarelo Passo 3/5$reset"
+            echo -e "$bege --> Mínimo 12 caracteres$reset"
+            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
+            echo ""
+            validar_senha "$pass_portainer" 12 && break
+        done
+
+        echo -e "$amarelo Passo 4/5$reset"
+        echo -e "$bege --> Sem espaços ou caracteres especiais$reset"
+        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo ""
+
+        echo -e "$amarelo Passo 5/5$reset"
+        echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && read -r email_ssl
+        echo ""
+
+        clear
+        nome_traefik_portainer
+        conferindo_as_info
+
+        echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
+        echo ""
+        echo -e "$amarelo Usuário:$branco $user_portainer$reset"
+        echo ""
+        echo -e "$amarelo Senha:$branco $pass_portainer$reset"
+        echo ""
+        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo ""
+        echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
+        echo ""
+        echo ""
+
+        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+
+        clear
+        nome_traefik_portainer
+        preencha_as_info
+    done
+
+    clear
+    instalando_msg
+
+    ## Garante estar em /root
+    cd /root || exit 1
+
+    ## Cria pasta de dados
+    mkdir -p dados_vps
+
+    ## Gera senha hash para o Portainer
+    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | sed 's/\$/\$\$/g')
+
+    echo -e "$amarelo• Salvando dados da VPS...$reset"
+    {
+        echo "[ SERVIDOR ]"
+        echo "Nome do Servidor: Flouds"
+        echo "Rede interna: $nome_rede_interna"
+        echo "Email SSL: $email_ssl"
+    } > dados_vps/dados_vps
+
+    {
+        echo "[ PORTAINER ]"
+        echo "Dominio do portainer: $url_portainer"
+        echo ""
+        echo "Usuario: $user_portainer"
+        echo ""
+        echo "Senha: $pass_portainer"
+        echo ""
+        echo "Token: "
+    } > dados_vps/dados_portainer
+
+    echo -e "$verde  ✔ Dados salvos$reset"
+    echo ""
+
+    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
+    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+    if [ "$SWARM_STATUS" != "active" ]; then
+        docker swarm init > /dev/null 2>&1
+    fi
+    echo -e "$verde  ✔ Swarm OK$reset"
+    echo ""
+
+    echo -e "$amarelo• Criando rede $nome_rede_interna...$reset"
+    docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1
+    echo -e "$verde  ✔ Rede criada$reset"
+    echo ""
+
+    ## Gera YAML do Traefik + Portainer
+    echo -e "$amarelo• Gerando stack YAML...$reset"
+    cat > traefik_portainer.yaml << EOF
+version: "3.7"
+
+services:
+
+  traefik:
+    image: traefik:latest
+    command:
+      - --api.dashboard=true
+      - --providers.docker.swarmMode=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=${nome_rede_interna}
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencryptresolver.acme.email=${email_ssl}
+      - --certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json
+      - --log.level=ERROR
+      - --log.format=common
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certificates:/etc/traefik/letsencrypt
+    networks:
+      - ${nome_rede_interna}
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+      - target: 443
+        published: 443
+        mode: host
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
+        - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
+        - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
+        - traefik.http.routers.http-catchall.entrypoints=web
+        - traefik.http.routers.http-catchall.middlewares=redirect-https@docker
+        - traefik.http.routers.http-catchall.priority=1
+        - traefik.http.services.traefik.loadbalancer.server.port=8080
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    networks:
+      - ${nome_rede_interna}
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.routers.portainer.tls=true
+        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.portainer.service=portainer
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+
+volumes:
+  traefik_certificates:
+    external: true
+    name: traefik_certificates
+  portainer_data:
+    external: true
+    name: portainer_data
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    name: ${nome_rede_interna}
+EOF
+    echo -e "$verde  ✔ YAML gerado$reset"
+    echo ""
+
+    echo -e "$amarelo• Criando volumes...$reset"
+    docker volume create traefik_certificates > /dev/null 2>&1
+    docker volume create portainer_data > /dev/null 2>&1
+    echo -e "$verde  ✔ Volumes criados$reset"
+    echo ""
+
+    echo -e "$amarelo• Deployando stack...$reset"
+    docker stack deploy -c traefik_portainer.yaml traefik --with-registry-auth > /dev/null 2>&1
+    docker stack deploy -c traefik_portainer.yaml portainer --with-registry-auth > /dev/null 2>&1
+
+    ## Deploy direto (sem API do Portainer pois ainda não está pronto)
+    docker stack deploy -c traefik_portainer.yaml traefik_portainer --with-registry-auth
+    echo ""
+
+    sleep 5
+
+    instalado_msg
+    guarde_os_dados_msg
+
+    echo -e "$verde [ TRAEFIK & PORTAINER ]$reset"
+    echo ""
+    echo -e "$amarelo URL do Portainer:$branco https://$url_portainer$reset"
+    echo ""
+    echo -e "$amarelo Usuário:$branco $user_portainer$reset"
+    echo ""
+    echo -e "$amarelo Senha:$branco $pass_portainer$reset"
+    echo ""
+    echo -e "$bege ⚠ Aguarde 1-2 minutos para o Portainer iniciar e configurar sua senha de admin.$reset"
+    echo ""
+
+    requisitar_outra_instalacao
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## [2] FZAP (stacks independentes: postgres + fzap)
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+ferramenta_fzap() {
+
+    recursos 1 2 && return
+
+    clear
+
+    dados
+
+    nome_fzap
+    preencha_as_info
+
+    while true; do
+
+        echo -e "$amarelo Passo 1/2$reset"
+        echo -en "$amarelo Digite o domínio da Fzap (ex: fzap.seudominio.com): $reset" && read -r url_fzap
+        echo ""
+
+        echo -e "$amarelo Passo 2/2$reset"
+        echo -e "$bege --> Opcional. Deixe em branco para usar a versão free$reset"
+        echo -en "$amarelo Chave de licença Flouds (pressione Enter para pular): $reset" && read -r licence_key
+        echo ""
+
+        ## Auto-gera credenciais
+        senha_postgres=$(gerar_token 24)
+        admin_token=$(gerar_token 32)
+
+        clear
+        nome_fzap
+        conferindo_as_info
+
+        echo -e "$amarelo Domínio da Fzap:$branco $url_fzap$reset"
+        echo ""
+        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo ""
+        echo -e "$amarelo Licença:$branco ${licence_key:-versão free}$reset"
+        echo ""
+        echo -e "$amarelo Senha PostgreSQL:$branco (gerada automaticamente)$reset"
+        echo ""
+        echo -e "$amarelo Admin Token:$branco (gerado automaticamente)$reset"
+        echo ""
+        echo ""
+
+        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+
+        clear
+        nome_fzap
+        preencha_as_info
+    done
+
+    clear
+    instalando_msg
+
+    cd /root || exit 1
+
+    ## Garante que a rede exista
+    if [ -n "$nome_rede_interna" ]; then
+        docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1 || true
+    fi
+
+    ## Garante credenciais do Portainer
+    verificar_arquivo_portainer
+
+    ## -------------------------------------------------------------------------
+    ## STACK 1: postgres
+    ## -------------------------------------------------------------------------
+
+    echo -e "$amarelo• Criando volume do banco de dados...$reset"
+    docker volume create fzap_dbdata > /dev/null 2>&1
+    echo -e "$verde  ✔ Volume fzap_dbdata criado$reset"
+    echo ""
+
+    echo -e "$amarelo• Gerando stack postgres...$reset"
+    cat > postgres.yaml << EOF
+version: "3.7"
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    networks:
+      - ${nome_rede_interna}
+    volumes:
+      - fzap_dbdata:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=${senha_postgres}
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=fzap
+      - TZ=America/Sao_Paulo
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+volumes:
+  fzap_dbdata:
+    name: fzap_dbdata
+    external: true
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    name: ${nome_rede_interna}
+EOF
+    echo -e "$verde  ✔ YAML postgres gerado$reset"
+    echo ""
+
+    deploy "postgres"
+
+    ## -------------------------------------------------------------------------
+    ## STACK 2: fzap
+    ## -------------------------------------------------------------------------
+
+    echo -e "$amarelo• Criando volumes da aplicação...$reset"
+    docker volume create fzap_files > /dev/null 2>&1
+    docker volume create fzap_logos > /dev/null 2>&1
+    echo -e "$verde  ✔ Volumes fzap_files e fzap_logos criados$reset"
+    echo ""
+
+    ## Em Docker Swarm, serviços de stacks diferentes na mesma rede
+    ## são acessados pelo nome completo: <stack>_<service>
+    echo -e "$amarelo• Gerando stack fzap...$reset"
+    cat > fzap.yaml << EOF
+version: "3.7"
+
+services:
+
+  fzap:
+    image: dncarbonell/fzap:latest
+    networks:
+      - ${nome_rede_interna}
+    volumes:
+      - fzap_files:/app/files
+      - fzap_logos:/app/data/public-folder-logos
+    environment:
+      - TZ=America/Sao_Paulo
+      - FZAP_LANGUAGE=pt-BR
+      - PUBLIC_BASE_URL=https://${url_fzap}
+      - ADMIN_TOKEN=${admin_token}
+      - FLOUDS_LICENCE_KEY=${licence_key}
+      - DB_DRIVER=postgres
+      - DB_HOST=postgres_postgres
+      - DB_PORT=5432
+      - DB_NAME=fzap
+      - DB_USER=postgres
+      - DB_PASSWORD=${senha_postgres}
+      - SESSION_DEVICE_NAME=Fzap
+      - WEBHOOK_FORMAT=json
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1024M
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.fzap.rule=Host(\`${url_fzap}\`)
+        - traefik.http.routers.fzap.entrypoints=websecure
+        - traefik.http.routers.fzap.tls=true
+        - traefik.http.routers.fzap.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.fzap.service=fzap
+        - traefik.http.services.fzap.loadbalancer.server.port=8080
+
+volumes:
+  fzap_files:
+    name: fzap_files
+    external: true
+  fzap_logos:
+    name: fzap_logos
+    external: true
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    name: ${nome_rede_interna}
+EOF
+    echo -e "$verde  ✔ YAML fzap gerado$reset"
+    echo ""
+
+    deploy "fzap"
+
+    instalado_msg
+    guarde_os_dados_msg
+
+    echo -e "$verde [ FZAP ]$reset"
+    echo ""
+    echo -e "$amarelo URL:$branco https://$url_fzap$reset"
+    echo ""
+    echo -e "$amarelo Admin Token:$branco $admin_token$reset"
+    echo ""
+    echo -e "$amarelo Licença:$branco ${licence_key:-versão free}$reset"
+    echo ""
+    echo -e "$verde [ BANCO DE DADOS ]$reset"
+    echo ""
+    echo -e "$amarelo Host (interno):$branco postgres_postgres$reset"
+    echo ""
+    echo -e "$amarelo Porta:$branco 5432$reset"
+    echo ""
+    echo -e "$amarelo Usuário:$branco postgres$reset"
+    echo ""
+    echo -e "$amarelo Senha:$branco $senha_postgres$reset"
+    echo ""
+    echo -e "$amarelo Database:$branco fzap$reset"
+    echo ""
+
+    requisitar_outra_instalacao
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## MENU
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+menu_instalador() {
+    echo -e "${amarelo}[ 1 ]${reset} - ${branco}Traefik & Portainer${reset}"
+    echo -e "${amarelo}[ 2 ]${reset} - ${branco}Fzap${reset}"
+    echo ""
+    echo -e "${amarelo}[ 0 ]${reset} - ${branco}Sair${reset}"
+    echo ""
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## INÍCIO
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Verifica root
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "$vermelho Este script precisa ser executado como root.$reset"
+    exit 1
+fi
+
+cd /root || exit 1
+
+## Tela de boas-vindas
+nome_instalador
+
+echo -e "$amarelo====================================================================================================$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo=  $branco Este instalador foi desenvolvido pela equipe Flouds para facilitar a implantação         $amarelo=$reset"
+echo -e "$amarelo=  $branco da plataforma Fzap em servidores VPS com Docker Swarm.                                  $amarelo=$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo====================================================================================================$reset"
+echo ""
+echo ""
+read -rp "Pressione ENTER para continuar..."
+
+## Loop principal
+while true; do
+
+    nome_menu
+    menu_instalador
+
+    read -rp "Digite o número da opção desejada: " opcao
+
+    case $opcao in
+
+        1|traefik|portainer)
+            verificar_stack "traefik_portainer" && continue || echo ""
+            ferramenta_traefik_e_portainer
+            ;;
+
+        2|fzap|FZAP)
+            verificar_stack "postgres" && continue || echo ""
+            verificar_stack "fzap" && continue || echo ""
+            verificar_docker_e_portainer_traefik || continue
+            ferramenta_fzap
+            ;;
+
+        0|sair|exit)
+            nome_finalizado
+            echo -e "$branco Até mais!$reset"
+            echo ""
+            exit 0
+            ;;
+
+        *)
+            clear
+            erro_msg
+            echo ""
+            echo -e " Opção inválida. Digite 1, 2 ou 0."
+            echo ""
+            sleep 3
+            ;;
+    esac
+
+done

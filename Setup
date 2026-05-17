@@ -1,0 +1,95 @@
+#!/bin/bash
+
+## Cores
+amarelo="\e[33m"
+verde="\e[32m"
+branco="\e[97m"
+vermelho="\e[91m"
+reset="\e[0m"
+
+clear
+echo ""
+echo -e "$amarelo====================================================================================================$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo=   $branco███████╗██╗      ██████╗ ██╗   ██╗██████╗ ███████╗    ██╗███╗   ██╗███████╗████████╗ █████╗ $amarelo  =$reset"
+echo -e "$amarelo=   $branco██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗██╔════╝    ██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗$amarelo =$reset"
+echo -e "$amarelo=   $branco█████╗  ██║     ██║   ██║██║   ██║██║  ██║███████╗    ██║██╔██╗ ██║███████╗   ██║   ███████║$amarelo =$reset"
+echo -e "$amarelo=   $branco██╔══╝  ██║     ██║   ██║██║   ██║██║  ██║╚════██║    ██║██║╚██╗██║╚════██║   ██║   ██╔══██║$amarelo =$reset"
+echo -e "$amarelo=   $branco██║     ███████╗╚██████╔╝╚██████╔╝██████╔╝███████║    ██║██║ ╚████║███████║   ██║   ██║  ██║$amarelo =$reset"
+echo -e "$amarelo=   $branco╚═╝     ╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝    ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝$amarelo=$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo====================================================================================================$reset"
+echo ""
+echo -e "$branco Aguarde enquanto preparamos o ambiente...$reset"
+echo ""
+sleep 1
+
+## Verifica root
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "$vermelho Este script precisa ser executado como root.$reset"
+    exit 1
+fi
+
+## Garante estar em /root
+cd /root || exit 1
+
+## Atualiza o sistema
+echo -e "$amarelo[1/8]$reset Atualizando o sistema..."
+apt update -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[2/8]$reset Fazendo upgrade..."
+apt upgrade -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[3/8]$reset Instalando sudo..."
+apt install sudo -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[4/8]$reset Instalando apt-utils..."
+apt-get install -y apt-utils > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[5/8]$reset Instalando jq..."
+apt-get install -y jq > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[6/8]$reset Instalando git e curl..."
+apt install -y git curl > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+echo -e "$amarelo[7/8]$reset Instalando apache2-utils..."
+apt install -y apache2-utils > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+
+## Instala Docker se não existir
+echo -e "$amarelo[8/8]$reset Verificando Docker..."
+if ! command -v docker &> /dev/null; then
+    echo -e "       Instalando Docker..."
+    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
+    echo -e "$verde  ✔ Docker instalado$reset"
+else
+    echo -e "$verde  ✔ Docker já instalado$reset"
+fi
+
+echo ""
+
+## Verifica/inicia Swarm
+SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+if [ "$SWARM_STATUS" != "active" ]; then
+    echo -e "$amarelo Iniciando Docker Swarm...$reset"
+    docker swarm init > /dev/null 2>&1 && echo -e "$verde  ✔ Swarm iniciado$reset" || echo -e "$vermelho  ✖ Falha ao iniciar Swarm$reset"
+else
+    echo -e "$verde  ✔ Docker Swarm já está ativo$reset"
+fi
+
+echo ""
+echo -e "$verde Ambiente pronto! Iniciando o instalador Flouds...$reset"
+echo ""
+sleep 2
+
+## Remove versão anterior do instalador se existir
+[ -e "SetupFlouds" ] && rm SetupFlouds
+
+## Baixa e executa o instalador principal
+curl -sSL https://raw.githubusercontent.com/dncarbonell/installer-fzap/main/SetupFlouds -o SetupFlouds
+if [ $? -eq 0 ]; then
+    chmod +x SetupFlouds
+    ./SetupFlouds
+else
+    echo -e "$vermelho Erro ao baixar o instalador. Verifique sua conexão.$reset"
+    exit 1
+fi

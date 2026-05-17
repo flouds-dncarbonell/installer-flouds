@@ -1,0 +1,97 @@
+version: "3.7"
+
+services:
+  fzap:
+    image: dncarbonell/fzap:latest
+
+    networks:
+      - FloudsNet
+
+    volumes:
+      - fzap_dbdata:/app/dbdata
+      - fzap_files:/app/files
+      - fzap_logos:/app/data/public-folder-logos
+
+    environment:
+      # --- Configurações Gerais e Sistema ---
+      - TZ=America/Sao_Paulo
+      - FZAP_LANGUAGE=pt-BR                               # pt-BR, en-US, es-LATAM
+      - PUBLIC_BASE_URL=https://exemplo.com               # URL completa onde a fzap está instalada - Se instalado em subdomínio colocar o subdomínio completo, sempre com "https://". Ex: https://api.exemplo.com
+      #- LOG_LEVEL=info                                   # trace, debug, info, warn, error, fatal, panic
+      #- CHATWOOT_SYSTEM_IDENTIFIER=flouds.com.br         # Uso interno no Chatwoot - é o identificador do contato de onboarding - Antes era FZAP_SYSTEM_IDENTIFIER
+      #- CHATWOOT_SYSTEM_NAME=FZAP                        # Nome exibido no contato de onboarding - Antes era FZAP_SYSTEM_NAME
+      #- CHATWOOT_PLATFORM_NAME=Chatwoot                  # Nome da plataforma white label do Chatwoot - Antes era PLATFORM_NAME
+      #- CHATWOOT_SERVICE_URL=https://app.chatwoot.com    # Url de exemplo de conexão e integração do Chawtoot - Antes era DEFAULT_SERVICE_URL
+
+      # --- Autenticação e Licença ---
+      - ADMIN_TOKEN=admin_token_exemplo                   # Token de autenticação da API. Escolha um valor seguro
+      - FLOUDS_LICENCE_KEY=                               # Deixe vazio para usar a versão free - Em caso de assinatura, a key estará no seu dashboard
+      - FLOUDS_LIFETIME_LICENCE_KEY=                      # Caso tenha versão vitalícia (licença fixa por domínio - legado)
+
+      # --- Banco de Dados (PostgreSQL) ---
+      - DB_DRIVER=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=fzap
+      - DB_USER=postgres
+      - DB_PASSWORD=senha_exemplo
+
+      # --- WhatsApp e Webhooks ---
+      - SESSION_DEVICE_NAME=Fzap                          # Nome da dispositivo conectado (aparece no celular)
+      - WEBHOOK_FORMAT=json
+      #- IMAGE_QUALITY_HD=false                           # true para HD, false para padrão
+
+      # --- WhatsApp Cloud API (Meta Embedded Signup) ---
+      # Configurações para habilitar o fluxo guiado de cadastro direto pela Meta Cloud API.
+      # ATENÇÃO: Recurso exclusivo para planos pagos (requer licença válida, não funciona na versão free).
+      #- META_APP_ID=                                     # Meta App ID (obtido em developers.facebook.com)
+      #- META_APP_SECRET=                                 # Meta App Secret (chave secreta do aplicativo)
+      #- META_CONFIG_ID=                                  # Meta Business Login Config ID (ID de configuração do login)
+
+      # --- Mensageria (RabbitMQ) ---
+      #- RABBITMQ_ENABLED=true
+      #- RABBITMQ_URL=amqp://fzap:fzap@rabbitmq:5672/
+      #- RABBITMQ_EXCHANGE=fzap_events
+      #- RABBITMQ_PREFIX=fzap
+      #- RABBITMQ_FRAME_MAX=131072                        # Tamanho máx de frame (128KB)
+      #- RABBITMQ_HEARTBEAT=30                            # Em segundos
+      #- RABBITMQ_MAX_RECONNECT=10
+      #- RABBITMQ_RECONNECT_DELAY=5                       # Em segundos
+
+      # --- Monitoramento de Erros (Sentry) - Opcional ---
+      # O Sentry é uma ferramenta de rastreamento que captura *somente erros* e falhas da aplicação em tempo real.
+      # Isso permite que o desenvolvedor identifique e corrija os problemas de forma ativa, sem precisar esperar uma reclamação ou feedback do usuário.
+      # A URL (DSN) de integração deve ser obtida com a equipe no grupo de suporte oficial. Deixe vazio caso não queira utilizar.
+      #- SENTRY_DSN=
+      
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        # Configuração Traefik
+        - traefik.enable=true
+        - traefik.http.routers.fzap.rule=Host(`exemplo.com`)
+        - traefik.http.routers.fzap.entrypoints=websecure
+        - traefik.http.routers.fzap.tls=true
+        - traefik.http.routers.fzap.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.fzap.service=fzap
+        - traefik.http.services.fzap.loadbalancer.server.port=8080
+
+volumes:
+  fzap_dbdata:
+    name: fzap_dbdata
+    external: true
+  fzap_files:
+    name: fzap_files
+    external: true
+  fzap_logos:
+    name: fzap_logos
+    external: true
+
+networks:
+  FloudsNet:
+    name: FloudsNet
+    external: true
