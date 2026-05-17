@@ -1163,11 +1163,24 @@ ferramenta_fzap() {
 
     while true; do
 
-        echo -e "$amarelo Passo 1/2$reset"
+        echo -e "$amarelo Passo 1/3$reset"
         echo -en "$amarelo Digite o domínio da Fzap (ex: fzap.seudominio.com): $reset" && read -r url_fzap
         echo ""
 
-        echo -e "$amarelo Passo 2/2$reset"
+        echo -e "$amarelo Passo 2/3 — Idioma$reset"
+        echo -e " $amarelo[1]$reset pt-BR    (Português)"
+        echo -e " $amarelo[2]$reset en-US    (English)"
+        echo -e " $amarelo[3]$reset es-LATAM (Español)"
+        echo ""
+        read -rp " Escolha [1-3]: " escolha_idioma
+        case "$escolha_idioma" in
+            2) fzap_language="en-US" ;;
+            3) fzap_language="es-LATAM" ;;
+            *) fzap_language="pt-BR" ;;
+        esac
+        echo ""
+
+        echo -e "$amarelo Passo 3/3$reset"
         echo -e "$bege --> Opcional. Deixe em branco para usar a versão free$reset"
         echo -en "$amarelo Chave de licença Flouds (pressione Enter para pular): $reset" && read -r licence_key
         echo ""
@@ -1181,6 +1194,8 @@ ferramenta_fzap() {
         conferindo_as_info
 
         echo -e "$amarelo Domínio da Fzap:$branco $url_fzap$reset"
+        echo ""
+        echo -e "$amarelo Idioma:$branco $fzap_language$reset"
         echo ""
         echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
         echo ""
@@ -1200,10 +1215,74 @@ ferramenta_fzap() {
         preencha_as_info
     done
 
+    ## Configurações opcionais do Chatwoot (só pergunta se licença preenchida)
+    chatwoot_identifier=""
+    chatwoot_system_name=""
+    chatwoot_platform_name=""
+    chatwoot_service_url=""
+
+    if [ -n "$licence_key" ]; then
+        clear
+        nome_fzap
+
+        echo -e "$amarelo====================================================================================================$reset"
+        echo -e "$amarelo=                                                                                                  =$reset"
+        echo -e "$amarelo=          $branco Configurações opcionais do Chatwoot — pressione Enter para pular                $amarelo=$reset"
+        echo -e "$amarelo=                                                                                                  =$reset"
+        echo -e "$amarelo====================================================================================================$reset"
+        echo ""
+        echo ""
+
+        echo -e "$amarelo CHATWOOT_SYSTEM_IDENTIFIER$reset"
+        echo -e "$bege --> Identificador do contato de onboarding (ex: flouds.com.br)$reset"
+        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_identifier
+        echo ""
+
+        echo -e "$amarelo CHATWOOT_SYSTEM_NAME$reset"
+        echo -e "$bege --> Nome exibido no contato de onboarding (ex: FZAP)$reset"
+        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_system_name
+        echo ""
+
+        echo -e "$amarelo CHATWOOT_PLATFORM_NAME$reset"
+        echo -e "$bege --> Nome da plataforma Chatwoot white label (padrão: Chatwoot)$reset"
+        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_platform_name
+        echo ""
+
+        echo -e "$amarelo CHATWOOT_SERVICE_URL$reset"
+        echo -e "$bege --> URL onde o Chatwoot está instalado (ex: https://chatwoot.seudominio.com)$reset"
+        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_service_url
+        echo ""
+    fi
+
     clear
     instalando_msg
 
     cd /root || exit 1
+
+    ## Monta linhas condicionais do Chatwoot para o YAML
+    if [ -n "$chatwoot_identifier" ]; then
+        line_chatwoot_identifier="      - CHATWOOT_SYSTEM_IDENTIFIER=${chatwoot_identifier}"
+    else
+        line_chatwoot_identifier="      #- CHATWOOT_SYSTEM_IDENTIFIER="
+    fi
+
+    if [ -n "$chatwoot_system_name" ]; then
+        line_chatwoot_system_name="      - CHATWOOT_SYSTEM_NAME=${chatwoot_system_name}"
+    else
+        line_chatwoot_system_name="      #- CHATWOOT_SYSTEM_NAME="
+    fi
+
+    if [ -n "$chatwoot_platform_name" ]; then
+        line_chatwoot_platform_name="      - CHATWOOT_PLATFORM_NAME=${chatwoot_platform_name}"
+    else
+        line_chatwoot_platform_name="      #- CHATWOOT_PLATFORM_NAME=Chatwoot"
+    fi
+
+    if [ -n "$chatwoot_service_url" ]; then
+        line_chatwoot_service_url="      - CHATWOOT_SERVICE_URL=${chatwoot_service_url}"
+    else
+        line_chatwoot_service_url="      #- CHATWOOT_SERVICE_URL="
+    fi
 
     ## Garante que a rede exista
     if [ -n "$nome_rede_interna" ]; then
@@ -1291,19 +1370,53 @@ services:
       - fzap_files:/app/files
       - fzap_logos:/app/data/public-folder-logos
     environment:
+
+      # --- Configurações Gerais e Sistema ---
       - TZ=America/Sao_Paulo
-      - FZAP_LANGUAGE=pt-BR
+      - FZAP_LANGUAGE=${fzap_language}
       - PUBLIC_BASE_URL=https://${url_fzap}
+      #- LOG_LEVEL=info
+${line_chatwoot_identifier}
+${line_chatwoot_system_name}
+${line_chatwoot_platform_name}
+${line_chatwoot_service_url}
+
+      # --- Autenticação e Licença ---
       - ADMIN_TOKEN=${admin_token}
       - FLOUDS_LICENCE_KEY=${licence_key}
+      #- FLOUDS_LIFETIME_LICENCE_KEY=
+
+      # --- Banco de Dados (PostgreSQL) ---
       - DB_DRIVER=postgres
       - DB_HOST=postgres_postgres
       - DB_PORT=5432
       - DB_NAME=fzap
       - DB_USER=postgres
       - DB_PASSWORD=${senha_postgres}
+
+      # --- WhatsApp e Webhooks ---
       - SESSION_DEVICE_NAME=Fzap
       - WEBHOOK_FORMAT=json
+      #- IMAGE_QUALITY_HD=false
+
+      # --- WhatsApp Cloud API (Meta Embedded Signup) ---
+      #- META_APP_ID=
+      #- META_APP_SECRET=
+      #- META_CONFIG_ID=
+
+      # --- Mensageria (RabbitMQ) ---
+      #- RABBITMQ_ENABLED=true
+      #- RABBITMQ_URL=amqp://fzap:fzap@rabbitmq:5672/
+      #- RABBITMQ_EXCHANGE=fzap_events
+      #- RABBITMQ_PREFIX=fzap
+      #- RABBITMQ_FRAME_MAX=131072
+      #- RABBITMQ_HEARTBEAT=30
+      #- RABBITMQ_MAX_RECONNECT=10
+      #- RABBITMQ_RECONNECT_DELAY=5
+
+      # --- Monitoramento de Erros (Sentry) ---
+      #- SENTRY_DSN=
+
     deploy:
       mode: replicated
       replicas: 1
@@ -1363,6 +1476,9 @@ EOF
     echo -e "$amarelo Senha:$branco $senha_postgres$reset"
     echo ""
     echo -e "$amarelo Database:$branco fzap$reset"
+    echo ""
+    echo -e "$bege ℹ Configurações avançadas (Meta, RabbitMQ, Sentry e outras) podem ser$reset"
+    echo -e "$bege   preenchidas diretamente na stack da Fzap dentro do Portainer.$reset"
     echo ""
 
     requisitar_outra_instalacao
