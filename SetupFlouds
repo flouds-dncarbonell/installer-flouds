@@ -624,6 +624,96 @@ deploy_portainer() {
     wait_stack portainer || return 1
 }
 
+init_portainer_admin() {
+    local MAX_RETRIES=4
+    local DELAY=15
+    local CONTA_CRIADA=false
+
+    echo ""
+    echo -e "$amarelo• Inicializando conta admin do Portainer...$reset"
+
+    for i in $(seq 1 $MAX_RETRIES); do
+        RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/users/admin/init" \
+            -H "Content-Type: application/json" \
+            -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
+
+        if echo "$RESPONSE" | grep -q "\"Username\":\"$user_portainer\""; then
+            echo -e "$verde  ✔ Conta de administrador criada com sucesso!$reset"
+            CONTA_CRIADA=true
+            break
+        else
+            if [ "$i" -eq "$MAX_RETRIES" ]; then
+                echo -e "$vermelho  ✘ Não foi possível criar a conta admin após $MAX_RETRIES tentativas.$reset"
+                echo -e "$bege    Acesse https://$url_portainer e crie a conta manualmente.$reset"
+            else
+                echo -e "$bege    Aguardando Portainer iniciar... ($i/$MAX_RETRIES)$reset"
+                sleep $DELAY
+            fi
+        fi
+    done
+
+    if [ "$CONTA_CRIADA" = true ]; then
+        sed -i "s|Token: .*|Token: |" "$dados_portainer_file" 2>/dev/null
+    fi
+}
+
+reiniciar_portainer() {
+    clear
+    nome_traefik_portainer
+
+    if ! command -v docker &> /dev/null; then
+        erro_msg
+        echo ""
+        echo -e " Docker não encontrado neste servidor."
+        echo ""
+        echo -e " Voltando ao menu em 5 segundos..."
+        sleep 5
+        return
+    fi
+
+    if docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^portainer_portainer$"; then
+        echo -e "$amarelo• Reiniciando serviço do Portainer...$reset"
+        docker service update --force portainer_portainer >/dev/null || {
+            erro_msg
+            echo ""
+            echo -e " Falha ao reiniciar o serviço $amarelo portainer_portainer$reset."
+            echo ""
+            echo -e " Voltando ao menu em 5 segundos..."
+            sleep 5
+            return
+        }
+        wait_stack portainer
+    elif docker ps -a --format "{{.Names}}" 2>/dev/null | grep -q "^portainer$"; then
+        echo -e "$amarelo• Reiniciando container do Portainer...$reset"
+        docker restart portainer >/dev/null || {
+            erro_msg
+            echo ""
+            echo -e " Falha ao reiniciar o container $amarelo portainer$reset."
+            echo ""
+            echo -e " Voltando ao menu em 5 segundos..."
+            sleep 5
+            return
+        }
+    else
+        erro_msg
+        echo ""
+        echo -e " Portainer não encontrado neste servidor."
+        echo ""
+        echo -e " Instale a opção $amarelo[1] Traefik & Portainer$reset primeiro."
+        echo ""
+        echo -e " Voltando ao menu em 5 segundos..."
+        sleep 5
+        return
+    fi
+
+    instalado_msg
+    echo -e "$verde [ PORTAINER REINICIADO ]$reset"
+    echo ""
+    echo -e "$bege Se era uma instalação nova com timeout, acesse o Portainer novamente em até 5 minutos.$reset"
+    echo ""
+    requisitar_outra_instalacao
+}
+
 ## Verifica se Docker, Portainer e Traefik estão instalados
 verificar_docker_e_portainer_traefik() {
     if ! command -v docker &> /dev/null; then
@@ -1056,6 +1146,7 @@ _instalar_apenas_portainer() {
     preparar_docker_swarm || return
     validar_rede_interna_existente || return
     deploy_portainer || return
+    init_portainer_admin
 
     instalado_msg
     guarde_os_dados_msg
@@ -1066,8 +1157,6 @@ _instalar_apenas_portainer() {
     echo -e "$amarelo Usuário:$branco $user_portainer$reset"
     echo ""
     echo -e "$amarelo Senha:$branco $pass_portainer$reset"
-    echo ""
-    echo -e "$bege ⚠ Aguarde 1-2 minutos para o Portainer iniciar e configurar sua senha de admin.$reset"
     echo ""
 
     requisitar_outra_instalacao
@@ -1088,11 +1177,13 @@ verificar_infraestrutura_existente() {
         echo ""
         echo -e " $amarelo[1]$reset Reaproveitar infraestrutura existente"
         echo -e " $amarelo[2]$reset Reinstalar do zero"
+        echo -e " $amarelo[3]$reset Reiniciar Portainer"
         echo ""
         read -rp " Escolha: " escolha
         case "$escolha" in
             1) _usar_existentes; return 1 ;;
             2) return 0 ;;
+            3) reiniciar_portainer; return 1 ;;
             *) return 1 ;;
         esac
 
@@ -1104,11 +1195,13 @@ verificar_infraestrutura_existente() {
         echo ""
         echo -e " $amarelo[1]$reset Instalar apenas o Traefik"
         echo -e " $amarelo[2]$reset Reinstalar tudo do zero (remova o Portainer manualmente antes)"
+        echo -e " $amarelo[3]$reset Reiniciar Portainer"
         echo ""
         read -rp " Escolha: " escolha
         case "$escolha" in
             1) _instalar_apenas_traefik; return 1 ;;
             2) return 0 ;;
+            3) reiniciar_portainer; return 1 ;;
             *) return 1 ;;
         esac
 
@@ -1240,6 +1333,7 @@ ferramenta_traefik_e_portainer() {
     criar_rede_interna || return
     deploy_traefik || return
     deploy_portainer || return
+    init_portainer_admin
 
     instalado_msg
     guarde_os_dados_msg
@@ -1251,8 +1345,6 @@ ferramenta_traefik_e_portainer() {
     echo -e "$amarelo Usuário:$branco $user_portainer$reset"
     echo ""
     echo -e "$amarelo Senha:$branco $pass_portainer$reset"
-    echo ""
-    echo -e "$bege ⚠ Aguarde 1-2 minutos para o Portainer iniciar e configurar sua senha de admin.$reset"
     echo ""
 
     requisitar_outra_instalacao
