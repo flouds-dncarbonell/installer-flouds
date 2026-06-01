@@ -22,7 +22,7 @@ Instalador automatizado do **Fzap** — plataforma de automação WhatsApp desen
 Execute o comando abaixo no terminal do servidor como **root**:
 
 ```bash
-bash <(curl -sSL https://raw.githubusercontent.com/dncarbonell/installer-fzap/main/Setup)
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup | sudo bash
 ```
 
 O script irá:

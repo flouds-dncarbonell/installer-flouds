@@ -6,17 +6,19 @@ verde="\e[32m"
 branco="\e[97m"
 vermelho="\e[91m"
 reset="\e[0m"
+SETUP_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup"
+INSTALLER_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupFlouds"
 
 clear
 echo ""
 echo -e "$amarelo====================================================================================================$reset"
 echo -e "$amarelo=                                                                                                  =$reset"
-echo -e "$amarelo=   $branco███████╗██╗      ██████╗ ██╗   ██╗██████╗ ███████╗    ██╗███╗   ██╗███████╗████████╗ █████╗ $amarelo  =$reset"
-echo -e "$amarelo=   $branco██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗██╔════╝    ██║████╗  ██║██╔════╝╚══██╔══╝██╔══██╗$amarelo =$reset"
-echo -e "$amarelo=   $branco█████╗  ██║     ██║   ██║██║   ██║██║  ██║███████╗    ██║██╔██╗ ██║███████╗   ██║   ███████║$amarelo =$reset"
-echo -e "$amarelo=   $branco██╔══╝  ██║     ██║   ██║██║   ██║██║  ██║╚════██║    ██║██║╚██╗██║╚════██║   ██║   ██╔══██║$amarelo =$reset"
-echo -e "$amarelo=   $branco██║     ███████╗╚██████╔╝╚██████╔╝██████╔╝███████║    ██║██║ ╚████║███████║   ██║   ██║  ██║$amarelo =$reset"
-echo -e "$amarelo=   $branco╚═╝     ╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝    ╚═╝╚═╝  ╚═══╝╚══════╝   ╚═╝   ╚═╝  ╚═╝$amarelo=$reset"
+echo -e "$amarelo=                    $branco███████╗██╗      ██████╗ ██╗   ██╗██████╗ ███████╗$amarelo                    =$reset"
+echo -e "$amarelo=                    $branco██╔════╝██║     ██╔═══██╗██║   ██║██╔══██╗██╔════╝$amarelo                    =$reset"
+echo -e "$amarelo=                    $branco█████╗  ██║     ██║   ██║██║   ██║██║  ██║███████╗$amarelo                    =$reset"
+echo -e "$amarelo=                    $branco██╔══╝  ██║     ██║   ██║██║   ██║██║  ██║╚════██║$amarelo                    =$reset"
+echo -e "$amarelo=                    $branco██║     ███████╗╚██████╔╝╚██████╔╝██████╔╝███████║$amarelo                    =$reset"
+echo -e "$amarelo=                    $branco╚═╝     ╚══════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚══════╝$amarelo                    =$reset"
 echo -e "$amarelo=                                                                                                  =$reset"
 echo -e "$amarelo====================================================================================================$reset"
 echo ""
@@ -28,7 +30,12 @@ sleep 1
 if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo &>/dev/null; then
         echo -e "$amarelo Reexecutando com sudo...$reset"
-        exec sudo bash "$0" "$@"
+        tmp_script="$(mktemp)"
+        curl -fsSL "$SETUP_URL" -o "$tmp_script" || {
+            echo -e "$vermelho Erro ao baixar o instalador para executar com sudo.$reset"
+            exit 1
+        }
+        exec sudo bash "$tmp_script" "$@"
     fi
     echo -e "$vermelho Este script precisa ser executado como root.$reset"
     exit 1
@@ -89,7 +96,7 @@ sleep 2
 [ -e "SetupFlouds" ] && rm SetupFlouds
 
 ## Baixa e executa o instalador principal
-curl -sSL https://raw.githubusercontent.com/dncarbonell/installer-fzap/main/SetupFlouds -o SetupFlouds
+curl -fsSL "$INSTALLER_URL" -o SetupFlouds
 if [ $? -eq 0 ]; then
     chmod +x SetupFlouds
     ./SetupFlouds
