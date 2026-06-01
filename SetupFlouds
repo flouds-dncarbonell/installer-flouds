@@ -2,6 +2,7 @@
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 ##                           FLOUDS INSTALLER                              ##
+##     Estrutura inspirada no SetupOrion: https://github.com/oriondesign2015/SetupOrion
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
 versao="1.0.0"
@@ -1595,6 +1596,7 @@ echo -e "$amarelo===============================================================
 echo -e "$amarelo=                                                                                                  =$reset"
 echo -e "$amarelo=  $branco Este instalador foi desenvolvido pela equipe Flouds para facilitar a implantação         $amarelo=$reset"
 echo -e "$amarelo=  $branco da plataforma Fzap em servidores VPS com Docker Swarm.                                  $amarelo=$reset"
+echo -e "$amarelo=  $branco Estrutura inspirada no SetupOrion, projeto da comunidade OrionDesign.                   $amarelo=$reset"
 echo -e "$amarelo=                                                                                                  =$reset"
 echo -e "$amarelo====================================================================================================$reset"
 echo ""

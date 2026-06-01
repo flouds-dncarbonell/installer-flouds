@@ -82,4 +82,6 @@ O arquivo de referência da stack completa está em [`stack-fzap.md`](./stack-fz
 
 ---
 
-> O padrão de estrutura deste instalador foi inspirado no [SetupOrion](https://github.com/oriondesign2015/SetupOrion).
+## Créditos
+
+O padrão de estrutura deste instalador foi inspirado no [SetupOrion](https://github.com/oriondesign2015/SetupOrion), projeto da comunidade OrionDesign. Este projeto é mantido pela Flouds e não é afiliado ou endossado pelo SetupOrion.
