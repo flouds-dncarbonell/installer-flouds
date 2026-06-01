@@ -616,13 +616,12 @@ version: "3.7"
 services:
 
   traefik:
-    image: traefik:latest
+    image: traefik:v3
     command:
       - --api.dashboard=true
-      - --providers.docker.swarmMode=true
-      - --providers.docker.endpoint=unix:///var/run/docker.sock
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=${nome_rede_interna}
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=${nome_rede_interna}
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
@@ -658,7 +657,7 @@ services:
         - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
         - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
         - traefik.http.routers.http-catchall.entrypoints=web
-        - traefik.http.routers.http-catchall.middlewares=redirect-https@docker
+        - traefik.http.routers.http-catchall.middlewares=redirect-https
         - traefik.http.routers.http-catchall.priority=1
         - traefik.http.services.traefik.loadbalancer.server.port=8080
 
@@ -1034,13 +1033,12 @@ version: "3.7"
 services:
 
   traefik:
-    image: traefik:latest
+    image: traefik:v3
     command:
       - --api.dashboard=true
-      - --providers.docker.swarmMode=true
-      - --providers.docker.endpoint=unix:///var/run/docker.sock
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=${nome_rede_interna}
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=${nome_rede_interna}
       - --entrypoints.web.address=:80
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
@@ -1076,7 +1074,7 @@ services:
         - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
         - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
         - traefik.http.routers.http-catchall.entrypoints=web
-        - traefik.http.routers.http-catchall.middlewares=redirect-https@docker
+        - traefik.http.routers.http-catchall.middlewares=redirect-https
         - traefik.http.routers.http-catchall.priority=1
         - traefik.http.services.traefik.loadbalancer.server.port=8080
 
@@ -1125,9 +1123,6 @@ EOF
     echo ""
 
     echo -e "$amarelo• Deployando stack...$reset"
-    docker stack deploy -c traefik_portainer.yaml traefik --with-registry-auth > /dev/null 2>&1
-    docker stack deploy -c traefik_portainer.yaml portainer --with-registry-auth > /dev/null 2>&1
-
     ## Deploy direto (sem API do Portainer pois ainda não está pronto)
     docker stack deploy -c traefik_portainer.yaml traefik_portainer --with-registry-auth
     echo ""
