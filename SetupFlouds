@@ -14,6 +14,11 @@ bege="\e[93m"
 vermelho="\e[91m"
 reset="\e[0m"
 
+## Garante leitura interativa quando o script for executado via pipe (curl | bash)
+if [ ! -t 0 ] && [ -r /dev/tty ]; then
+    exec </dev/tty
+fi
+
 ## Diretório de dados
 home_directory="$HOME"
 dados_vps="${home_directory}/dados_vps/dados_vps"
@@ -1527,7 +1532,11 @@ while true; do
     nome_menu
     menu_instalador
 
-    read -rp "Digite o número da opção desejada: " opcao
+    if ! read -rp "Digite o número da opção desejada: " opcao; then
+        echo ""
+        echo -e "$vermelho Não foi possível ler a opção. Execute o instalador em um terminal interativo.$reset"
+        exit 1
+    fi
 
     case $opcao in
 
