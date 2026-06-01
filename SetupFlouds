@@ -370,7 +370,38 @@ validar_dominio_para_ssl() {
     return 0
 }
 
+instalar_docker() {
+    echo -e "$amarelo• Verificando Docker...$reset"
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo -e "$amarelo  Docker não encontrado. Instalando Docker...$reset"
+        curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || {
+            echo -e "$vermelho  ✖ Falha ao instalar Docker$reset"
+            return 1
+        }
+        echo -e "$verde  ✔ Docker instalado$reset"
+    else
+        echo -e "$verde  ✔ Docker já instalado$reset"
+    fi
+
+    systemctl enable docker >/dev/null 2>&1 || true
+    systemctl start docker >/dev/null 2>&1 || {
+        echo -e "$vermelho  ✖ Falha ao iniciar o serviço Docker$reset"
+        return 1
+    }
+
+    docker version >/dev/null 2>&1 || {
+        echo -e "$vermelho  ✖ Docker instalado, mas não respondeu corretamente$reset"
+        return 1
+    }
+
+    echo -e "$verde  ✔ Docker OK$reset"
+    echo ""
+}
+
 preparar_docker_swarm() {
+    instalar_docker || return 1
+
     echo -e "$amarelo• Inicializando Docker Swarm...$reset"
     SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
     if [ "$SWARM_STATUS" != "active" ]; then
@@ -454,6 +485,8 @@ services:
 
   traefik:
     image: ${traefik_image}
+    environment:
+      - DOCKER_API_VERSION=1.40
     command:
       - --api.dashboard=true
       - --providers.swarm.endpoint=unix:///var/run/docker.sock
@@ -577,7 +610,7 @@ deploy_traefik() {
     echo ""
 
     echo -e "$amarelo• Deployando Traefik...$reset"
-    docker stack deploy --prune --resolve-image always -c traefik.yaml traefik || return 1
+    docker stack deploy --detach=true --prune --resolve-image always -c traefik.yaml traefik || return 1
     wait_stack traefik || return 1
 }
 
@@ -589,7 +622,7 @@ deploy_portainer() {
     echo ""
 
     echo -e "$amarelo• Deployando Portainer...$reset"
-    docker stack deploy --prune --resolve-image always -c portainer.yaml portainer || return 1
+    docker stack deploy --detach=true --prune --resolve-image always -c portainer.yaml portainer || return 1
     wait_stack portainer || return 1
 }
 
