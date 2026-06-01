@@ -5,6 +5,7 @@
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
 versao="1.0.0"
+traefik_image="traefik:v3.5.3"
 
 ## Cores
 amarelo="\e[33m"
@@ -274,6 +275,323 @@ recursos() {
     return 1
 }
 
+normalizar_dominio() {
+    local dominio="$1"
+    dominio="${dominio#http://}"
+    dominio="${dominio#https://}"
+    dominio="${dominio%%/*}"
+    dominio="${dominio%%:*}"
+    echo "$dominio"
+}
+
+obter_ip_publico() {
+    curl -fsS4 --max-time 10 https://ifconfig.me 2>/dev/null \
+        || curl -fsS4 --max-time 10 https://api.ipify.org 2>/dev/null
+}
+
+configurar_firewall_http_https() {
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
+        echo -e "$amarelo• Liberando portas 80/443 no UFW...$reset"
+        ufw allow 80/tcp >/dev/null 2>&1
+        ufw allow 443/tcp >/dev/null 2>&1
+        echo -e "$verde  ✔ Firewall local OK$reset"
+        echo ""
+    fi
+}
+
+validar_portas_http_https() {
+    local portas_ocupadas=""
+
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)80$' && portas_ocupadas="$portas_ocupadas 80"
+        ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)443$' && portas_ocupadas="$portas_ocupadas 443"
+    fi
+
+    if [ -n "$portas_ocupadas" ] && ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^traefik_traefik$"; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " As portas$amarelo$portas_ocupadas$reset já parecem estar em uso."
+        echo -e " O Traefik precisa publicar as portas $amarelo80$reset e $amarelo443$reset para emitir SSL."
+        echo ""
+        echo -e " Pare o serviço que usa essas portas e tente novamente."
+        echo ""
+        sleep 8
+        return 1
+    fi
+
+    return 0
+}
+
+validar_dominio_para_ssl() {
+    local dominio
+    local ip_vps
+    local ips_dominio
+
+    dominio=$(normalizar_dominio "$1")
+    ip_vps=$(obter_ip_publico)
+    ips_dominio=$(getent ahostsv4 "$dominio" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
+
+    if [ -z "$ip_vps" ]; then
+        echo -e "$bege  ⚠ Não foi possível detectar o IP público da VPS. Continuando.$reset"
+        echo ""
+        return 0
+    fi
+
+    if [ -z "$ips_dominio" ]; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " O domínio $amarelo$dominio$reset não resolveu em DNS público."
+        echo -e " Crie um registro A apontando para o IP da VPS: $amarelo$ip_vps$reset"
+        echo ""
+        echo -e " Sem isso, a Let's Encrypt não consegue emitir o certificado SSL."
+        echo ""
+        sleep 10
+        return 1
+    fi
+
+    if ! echo "$ips_dominio" | tr ' ' '\n' | grep -qx "$ip_vps"; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " O domínio $amarelo$dominio$reset não aponta diretamente para esta VPS."
+        echo -e " IP da VPS: $amarelo$ip_vps$reset"
+        echo -e " IP(s) do domínio: $amarelo$ips_dominio$reset"
+        echo ""
+        echo -e " Para SSL automático, o domínio precisa chegar nesta VPS pelas portas 80 e 443."
+        echo -e " Se você usa proxy como Cloudflare, pode continuar desde que ele esteja apontando para esta VPS."
+        echo ""
+        read -rp "Deseja continuar mesmo assim? (Y/N): " confirmar_dns
+        [ "$confirmar_dns" = "Y" ] || [ "$confirmar_dns" = "y" ] || return 1
+    fi
+
+    return 0
+}
+
+preparar_docker_swarm() {
+    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
+    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+    if [ "$SWARM_STATUS" != "active" ]; then
+        docker swarm init >/dev/null 2>&1 || {
+            echo -e "$vermelho  ✖ Falha ao iniciar Docker Swarm$reset"
+            return 1
+        }
+    fi
+    echo -e "$verde  ✔ Swarm OK$reset"
+    echo ""
+}
+
+criar_rede_interna() {
+    echo -e "$amarelo• Criando rede $nome_rede_interna...$reset"
+    docker network inspect "$nome_rede_interna" >/dev/null 2>&1 \
+        || docker network create --driver=overlay --attachable "$nome_rede_interna" >/dev/null 2>&1 \
+        || {
+            echo -e "$vermelho  ✖ Falha ao criar rede $nome_rede_interna$reset"
+            return 1
+        }
+    echo -e "$verde  ✔ Rede OK$reset"
+    echo ""
+}
+
+validar_rede_interna_existente() {
+    if ! docker network inspect "$nome_rede_interna" >/dev/null 2>&1; then
+        clear
+        erro_msg
+        echo ""
+        echo -e " A rede Docker $amarelo$nome_rede_interna$reset não existe."
+        echo -e " Informe exatamente a mesma rede usada pelo Traefik existente."
+        echo ""
+        sleep 8
+        return 1
+    fi
+
+    return 0
+}
+
+wait_stack() {
+    local stack="$1"
+    local tentativa=1
+    local max_tentativas="${2:-36}"
+    local intervalo="${3:-5}"
+    local pendentes
+
+    echo -e "$amarelo• Aguardando serviços da stack $stack ficarem online...$reset"
+
+    while [ "$tentativa" -le "$max_tentativas" ]; do
+        pendentes=$(docker stack services "$stack" --format "{{.Name}} {{.Replicas}}" 2>/dev/null | awk '{
+            split($2, replicas, "/")
+            if (replicas[1] != replicas[2] || replicas[2] == "0") print $0
+        }')
+
+        if [ -z "$pendentes" ] && [ -n "$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null)" ]; then
+            echo -e "$verde  ✔ Stack $stack online$reset"
+            echo ""
+            return 0
+        fi
+
+        sleep "$intervalo"
+        tentativa=$((tentativa + 1))
+    done
+
+    echo -e "$vermelho  ✖ Stack $stack não ficou online dentro do tempo esperado$reset"
+    echo ""
+    docker stack services "$stack" 2>/dev/null
+    echo ""
+    echo -e " Verifique com:"
+    echo -e " $amarelo docker service ps ${stack}_NOME_DO_SERVICO --no-trunc$reset"
+    echo -e " $amarelo docker service logs ${stack}_NOME_DO_SERVICO --tail 100$reset"
+    echo ""
+    return 1
+}
+
+gerar_traefik_yaml() {
+    cat > traefik.yaml << EOF
+version: "3.7"
+
+services:
+
+  traefik:
+    image: ${traefik_image}
+    command:
+      - --api.dashboard=true
+      - --providers.swarm.endpoint=unix:///var/run/docker.sock
+      - --providers.swarm.exposedbydefault=false
+      - --providers.swarm.network=${nome_rede_interna}
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.web.http.redirections.entrypoint.permanent=true
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.transport.respondingTimeouts.idleTimeout=3600
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true
+      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.letsencryptresolver.acme.email=${email_ssl}
+      - --certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json
+      - --log.level=DEBUG
+      - --log.format=common
+      - --accesslog=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_certificates:/etc/traefik/letsencrypt
+    networks:
+      - ${nome_rede_interna}
+    ports:
+      - target: 80
+        published: 80
+        mode: host
+      - target: 443
+        published: 443
+        mode: host
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
+        - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
+        - traefik.http.routers.http-catchall.rule=Host(\`{host:.+}\`)
+        - traefik.http.routers.http-catchall.entrypoints=web
+        - traefik.http.routers.http-catchall.middlewares=redirect-https
+        - traefik.http.routers.http-catchall.priority=1
+        - traefik.http.services.traefik.loadbalancer.server.port=8080
+
+volumes:
+  traefik_certificates:
+    external: true
+    name: traefik_certificates
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    attachable: true
+    name: ${nome_rede_interna}
+EOF
+}
+
+gerar_portainer_yaml() {
+    cat > portainer.yaml << EOF
+version: "3.7"
+
+services:
+
+  agent:
+    image: portainer/agent:latest
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /var/lib/docker/volumes:/var/lib/docker/volumes
+    networks:
+      - ${nome_rede_interna}
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.platform.os == linux
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    volumes:
+      - portainer_data:/data
+    networks:
+      - ${nome_rede_interna}
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.routers.portainer.tls=true
+        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.portainer.service=portainer
+        - traefik.http.routers.portainer.priority=1
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+        - traefik.swarm.network=${nome_rede_interna}
+
+volumes:
+  portainer_data:
+    external: true
+    name: portainer_data
+
+networks:
+  ${nome_rede_interna}:
+    external: true
+    attachable: true
+    name: ${nome_rede_interna}
+EOF
+}
+
+deploy_traefik() {
+    echo -e "$amarelo• Gerando traefik.yaml...$reset"
+    gerar_traefik_yaml || return 1
+    docker volume create traefik_certificates >/dev/null 2>&1
+    echo -e "$verde  ✔ traefik.yaml gerado$reset"
+    echo ""
+
+    echo -e "$amarelo• Deployando Traefik...$reset"
+    docker stack deploy --prune --resolve-image always -c traefik.yaml traefik || return 1
+    wait_stack traefik || return 1
+}
+
+deploy_portainer() {
+    echo -e "$amarelo• Gerando portainer.yaml...$reset"
+    gerar_portainer_yaml || return 1
+    docker volume create portainer_data >/dev/null 2>&1
+    echo -e "$verde  ✔ portainer.yaml gerado$reset"
+    echo ""
+
+    echo -e "$amarelo• Deployando Portainer...$reset"
+    docker stack deploy --prune --resolve-image always -c portainer.yaml portainer || return 1
+    wait_stack portainer || return 1
+}
+
 ## Verifica se Docker, Portainer e Traefik estão instalados
 verificar_docker_e_portainer_traefik() {
     if ! command -v docker &> /dev/null; then
@@ -524,6 +842,8 @@ _usar_existentes() {
         preencha_as_info
     done
 
+    url_portainer=$(normalizar_dominio "$url_portainer")
+
     mkdir -p dados_vps
 
     {
@@ -583,6 +903,8 @@ _instalar_apenas_traefik() {
         preencha_as_info
     done
 
+    url_portainer=$(normalizar_dominio "$url_portainer")
+
     clear
     instalando_msg
 
@@ -596,94 +918,12 @@ _instalar_apenas_traefik() {
         echo "Email SSL: $email_ssl"
     } > dados_vps/dados_vps
 
-    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
-    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
-    if [ "$SWARM_STATUS" != "active" ]; then
-        docker swarm init > /dev/null 2>&1
-    fi
-    echo -e "$verde  ✔ Swarm OK$reset"
-    echo ""
-
-    echo -e "$amarelo• Criando rede $nome_rede_interna...$reset"
-    docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1
-    echo -e "$verde  ✔ Rede criada$reset"
-    echo ""
-
-    echo -e "$amarelo• Gerando stack YAML...$reset"
-    cat > traefik_only.yaml << EOF
-version: "3.7"
-
-services:
-
-  traefik:
-    image: traefik:v3
-    command:
-      - --api.dashboard=true
-      - --providers.swarm.endpoint=unix:///var/run/docker.sock
-      - --providers.swarm.exposedbydefault=false
-      - --providers.swarm.network=${nome_rede_interna}
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.web.http.redirections.entrypoint.permanent=true
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true
-      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.letsencryptresolver.acme.email=${email_ssl}
-      - --certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json
-      - --log.level=ERROR
-      - --log.format=common
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_certificates:/etc/traefik/letsencrypt
-    networks:
-      - ${nome_rede_interna}
-    ports:
-      - target: 80
-        published: 80
-        mode: host
-      - target: 443
-        published: 443
-        mode: host
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      labels:
-        - traefik.enable=true
-        - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
-        - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
-        - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
-        - traefik.http.routers.http-catchall.entrypoints=web
-        - traefik.http.routers.http-catchall.middlewares=redirect-https
-        - traefik.http.routers.http-catchall.priority=1
-        - traefik.http.services.traefik.loadbalancer.server.port=8080
-
-volumes:
-  traefik_certificates:
-    external: true
-    name: traefik_certificates
-
-networks:
-  ${nome_rede_interna}:
-    external: true
-    name: ${nome_rede_interna}
-EOF
-    echo -e "$verde  ✔ YAML gerado$reset"
-    echo ""
-
-    echo -e "$amarelo• Criando volume...$reset"
-    docker volume create traefik_certificates > /dev/null 2>&1
-    echo -e "$verde  ✔ Volume criado$reset"
-    echo ""
-
-    echo -e "$amarelo• Deployando Traefik...$reset"
-    docker stack deploy -c traefik_only.yaml traefik_portainer --with-registry-auth
-    echo ""
-
-    sleep 5
+    validar_dominio_para_ssl "$url_portainer" || return
+    validar_portas_http_https || return
+    configurar_firewall_http_https
+    preparar_docker_swarm || return
+    criar_rede_interna || return
+    deploy_traefik || return
 
     criar_arquivo_portainer
 
@@ -749,6 +989,8 @@ _instalar_apenas_portainer() {
         preencha_as_info
     done
 
+    url_portainer=$(normalizar_dominio "$url_portainer")
+
     clear
     instalando_msg
 
@@ -778,65 +1020,10 @@ _instalar_apenas_portainer() {
     echo -e "$verde  ✔ Dados salvos$reset"
     echo ""
 
-    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
-    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
-    if [ "$SWARM_STATUS" != "active" ]; then
-        docker swarm init > /dev/null 2>&1
-    fi
-    echo -e "$verde  ✔ Swarm OK$reset"
-    echo ""
-
-    echo -e "$amarelo• Gerando stack YAML...$reset"
-    cat > portainer_only.yaml << EOF
-version: "3.7"
-
-services:
-
-  portainer:
-    image: portainer/portainer-ce:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    networks:
-      - ${nome_rede_interna}
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
-        - traefik.http.routers.portainer.entrypoints=websecure
-        - traefik.http.routers.portainer.tls=true
-        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.portainer.service=portainer
-        - traefik.http.services.portainer.loadbalancer.server.port=9000
-
-volumes:
-  portainer_data:
-    external: true
-    name: portainer_data
-
-networks:
-  ${nome_rede_interna}:
-    external: true
-    name: ${nome_rede_interna}
-EOF
-    echo -e "$verde  ✔ YAML gerado$reset"
-    echo ""
-
-    echo -e "$amarelo• Criando volume...$reset"
-    docker volume create portainer_data > /dev/null 2>&1
-    echo -e "$verde  ✔ Volume criado$reset"
-    echo ""
-
-    echo -e "$amarelo• Deployando Portainer...$reset"
-    docker stack deploy -c portainer_only.yaml traefik_portainer --with-registry-auth
-    echo ""
-
-    sleep 5
+    validar_dominio_para_ssl "$url_portainer" || return
+    preparar_docker_swarm || return
+    validar_rede_interna_existente || return
+    deploy_portainer || return
 
     instalado_msg
     guarde_os_dados_msg
@@ -978,6 +1165,8 @@ ferramenta_traefik_e_portainer() {
         preencha_as_info
     done
 
+    url_portainer=$(normalizar_dominio "$url_portainer")
+
     clear
     instalando_msg
 
@@ -1012,122 +1201,13 @@ ferramenta_traefik_e_portainer() {
     echo -e "$verde  ✔ Dados salvos$reset"
     echo ""
 
-    echo -e "$amarelo• Inicializando Docker Swarm...$reset"
-    SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
-    if [ "$SWARM_STATUS" != "active" ]; then
-        docker swarm init > /dev/null 2>&1
-    fi
-    echo -e "$verde  ✔ Swarm OK$reset"
-    echo ""
-
-    echo -e "$amarelo• Criando rede $nome_rede_interna...$reset"
-    docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1
-    echo -e "$verde  ✔ Rede criada$reset"
-    echo ""
-
-    ## Gera YAML do Traefik + Portainer
-    echo -e "$amarelo• Gerando stack YAML...$reset"
-    cat > traefik_portainer.yaml << EOF
-version: "3.7"
-
-services:
-
-  traefik:
-    image: traefik:v3
-    command:
-      - --api.dashboard=true
-      - --providers.swarm.endpoint=unix:///var/run/docker.sock
-      - --providers.swarm.exposedbydefault=false
-      - --providers.swarm.network=${nome_rede_interna}
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.web.http.redirections.entrypoint.permanent=true
-      - --entrypoints.websecure.address=:443
-      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge=true
-      - --certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web
-      - --certificatesresolvers.letsencryptresolver.acme.email=${email_ssl}
-      - --certificatesresolvers.letsencryptresolver.acme.storage=/etc/traefik/letsencrypt/acme.json
-      - --log.level=ERROR
-      - --log.format=common
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - traefik_certificates:/etc/traefik/letsencrypt
-    networks:
-      - ${nome_rede_interna}
-    ports:
-      - target: 80
-        published: 80
-        mode: host
-      - target: 443
-        published: 443
-        mode: host
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      labels:
-        - traefik.enable=true
-        - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
-        - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
-        - traefik.http.routers.http-catchall.rule=hostregexp(\`{host:.+}\`)
-        - traefik.http.routers.http-catchall.entrypoints=web
-        - traefik.http.routers.http-catchall.middlewares=redirect-https
-        - traefik.http.routers.http-catchall.priority=1
-        - traefik.http.services.traefik.loadbalancer.server.port=8080
-
-  portainer:
-    image: portainer/portainer-ce:latest
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    networks:
-      - ${nome_rede_interna}
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.role == manager
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
-        - traefik.http.routers.portainer.entrypoints=websecure
-        - traefik.http.routers.portainer.tls=true
-        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.portainer.service=portainer
-        - traefik.http.services.portainer.loadbalancer.server.port=9000
-
-volumes:
-  traefik_certificates:
-    external: true
-    name: traefik_certificates
-  portainer_data:
-    external: true
-    name: portainer_data
-
-networks:
-  ${nome_rede_interna}:
-    external: true
-    name: ${nome_rede_interna}
-EOF
-    echo -e "$verde  ✔ YAML gerado$reset"
-    echo ""
-
-    echo -e "$amarelo• Criando volumes...$reset"
-    docker volume create traefik_certificates > /dev/null 2>&1
-    docker volume create portainer_data > /dev/null 2>&1
-    echo -e "$verde  ✔ Volumes criados$reset"
-    echo ""
-
-    echo -e "$amarelo• Deployando stack...$reset"
-    ## Deploy direto (sem API do Portainer pois ainda não está pronto)
-    docker stack deploy -c traefik_portainer.yaml traefik_portainer --with-registry-auth
-    echo ""
-
-    sleep 5
+    validar_dominio_para_ssl "$url_portainer" || return
+    validar_portas_http_https || return
+    configurar_firewall_http_https
+    preparar_docker_swarm || return
+    criar_rede_interna || return
+    deploy_traefik || return
+    deploy_portainer || return
 
     instalado_msg
     guarde_os_dados_msg
@@ -1536,7 +1616,6 @@ while true; do
     case $opcao in
 
         1|traefik|portainer)
-            verificar_stack "traefik_portainer" && continue || echo ""
             ferramenta_traefik_e_portainer
             ;;
 
