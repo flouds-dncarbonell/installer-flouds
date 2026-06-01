@@ -9,6 +9,8 @@ reset="\e[0m"
 SETUP_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup"
 INSTALLER_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupFlouds"
 
+## Bootstrap carregado via curl; não redirecionar stdin aqui.
+
 clear
 echo ""
 echo -e "$amarelo====================================================================================================$reset"
