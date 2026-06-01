@@ -14,8 +14,8 @@ bege="\e[93m"
 vermelho="\e[91m"
 reset="\e[0m"
 
-## Garante leitura interativa quando o script for executado via pipe (curl | bash)
-if [ ! -t 0 ] && [ -r /dev/tty ]; then
+## Garante leitura interativa quando o script for executado a partir de um bootstrap via pipe
+if [ ! -t 0 ] && [ -r /dev/tty ] && [ -f "$0" ]; then
     exec </dev/tty
 fi
 

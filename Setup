@@ -9,11 +9,6 @@ reset="\e[0m"
 SETUP_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup"
 INSTALLER_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupFlouds"
 
-## Garante leitura interativa quando o script for executado via pipe (curl | bash)
-if [ ! -t 0 ] && [ -r /dev/tty ]; then
-    exec </dev/tty
-fi
-
 clear
 echo ""
 echo -e "$amarelo====================================================================================================$reset"
