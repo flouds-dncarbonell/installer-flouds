@@ -62,10 +62,10 @@ encontrar_stack_chatwoot() {
     stacks_encontradas=$(echo "$stacks_encontradas" | sed '/^$/d')
 
     if [ -z "$stacks_encontradas" ]; then
-        msg_erro "Nenhuma stack Chatwoot encontrada neste servidor."
-        echo ""
-        msg_info "O comando procura stacks com serviços chamados rails, sidekiq ou worker."
-        msg_info "Instale o Chatwoot antes de usar este comando."
+        msg_erro "Nenhuma stack Chatwoot encontrada neste servidor." >&2
+        echo "" >&2
+        msg_info "O comando procura stacks com serviços chamados rails, sidekiq ou worker." >&2
+        msg_info "Instale o Chatwoot antes de usar este comando." >&2
         exit 1
     fi
 
@@ -77,22 +77,22 @@ encontrar_stack_chatwoot() {
         return
     fi
 
-    echo ""
-    msg_info "Mais de uma stack Chatwoot encontrada:"
-    echo ""
+    echo "" >&2
+    msg_info "Mais de uma stack Chatwoot encontrada:" >&2
+    echo "" >&2
     local i=1
     while IFS= read -r stack; do
         [ -z "$stack" ] && continue
-        echo -e " $amarelo[$i]$reset $stack"
+        echo -e " $amarelo[$i]$reset $stack" >&2
         i=$((i + 1))
     done <<< "$stacks_encontradas"
-    echo ""
+    echo "" >&2
     read_rp "Escolha [1-$((count))]: " escolha
 
     local selecionada
     selecionada=$(echo "$stacks_encontradas" | sed -n "${escolha}p")
     if [ -z "$selecionada" ]; then
-        msg_erro "Opção inválida."
+        msg_erro "Opção inválida." >&2
         exit 1
     fi
     echo "$selecionada"
@@ -129,13 +129,13 @@ encontrar_yaml_stack() {
         fi
     done
 
-    echo ""
-    msg_info "Não encontrei o arquivo YAML da stack ${stack}."
-    echo -en "$amarelo Caminho do arquivo (ex: /root/chatwoot.yaml): $reset"
+    echo "" >&2
+    msg_info "Não encontrei o arquivo YAML da stack ${stack}." >&2
+    echo -en "$amarelo Caminho do arquivo (ex: /root/chatwoot.yaml): $reset" >&2
     read_r yaml_path
 
     if [ ! -f "$yaml_path" ]; then
-        msg_erro "Arquivo não encontrado: $yaml_path"
+        msg_erro "Arquivo não encontrado: $yaml_path" >&2
         exit 1
     fi
     echo "$yaml_path"
@@ -148,15 +148,15 @@ selecionar_servicos() {
     todos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null)
 
     if [ -z "$todos" ]; then
-        msg_erro "Nenhum serviço encontrado na stack $stack."
+        msg_erro "Nenhum serviço encontrado na stack $stack." >&2
         exit 1
     fi
 
-    echo ""
-    msg_info "Serviços na stack ${stack}:"
-    echo ""
-    echo -e "  $amarelo #$reset   $amarelo Serviço$reset                          $amarelo Candidato$reset"
-    echo -e "  ─── ─────────────────────────────── ─────────"
+    echo "" >&2
+    msg_info "Serviços na stack ${stack}:" >&2
+    echo "" >&2
+    echo -e "  $amarelo #$reset   $amarelo Serviço$reset                          $amarelo Candidato$reset" >&2
+    echo -e "  ─── ─────────────────────────────── ─────────" >&2
 
     local i=1
     local candidatos=""
@@ -169,19 +169,19 @@ selecionar_servicos() {
         else
             e_candidato="$bege—$reset"
         fi
-        printf "  $amarelo[%2d]$reset %-35s %b\n" "$i" "$svc" "$e_candidato"
+        printf "  $amarelo[%2d]$reset %-35s %b\n" "$i" "$svc" "$e_candidato" >&2
         i=$((i + 1))
     done <<< "$todos"
 
-    echo ""
-    echo -e "  $bege Candidatos = serviços com nome rails, sidekiq ou worker$reset"
-    echo ""
+    echo "" >&2
+    echo -e "  $bege Candidatos = serviços com nome rails, sidekiq ou worker$reset" >&2
+    echo "" >&2
 
     local total=$((i - 1))
     local sugestao=""
     [ -n "$candidatos" ] && sugestao=$(echo "$candidatos" | tr -s ' ' ',' | sed 's/^,//;s/,$//')
 
-    echo -en "$amarelo Selecione os serviços (ex: 1,3,5) [Enter=$sugestao]: $reset"
+    echo -en "$amarelo Selecione os serviços (ex: 1,3,5) [Enter=$sugestao]: $reset" >&2
     read_r escolha
 
     [ -z "$escolha" ] && escolha="$sugestao"
@@ -191,7 +191,7 @@ selecionar_servicos() {
     for idx in "${indices[@]}"; do
         idx=$(echo "$idx" | tr -d ' ')
         if ! echo "$idx" | grep -qE '^[0-9]+$' || [ "$idx" -lt 1 ] || [ "$idx" -gt "$total" ]; then
-            msg_erro "Índice inválido: $idx"
+            msg_erro "Índice inválido: $idx" >&2
             exit 1
         fi
         local nome
