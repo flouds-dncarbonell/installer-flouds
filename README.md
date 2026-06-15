@@ -35,26 +35,6 @@ O script irá:
 
 ---
 
-## Comandos isolados
-
-Funcionalidades que podem ser executadas sem baixar o instalador completo. Cada comando é um script leve que carrega apenas o necessário via `lib/common.sh`.
-
-| Comando | Descrição |
-|---|---|
-| `habilitar-chatwoot-enterprise` | Injeta `chatwoot_hub.rb` na stack Chatwoot existente e reinicia o serviço |
-
-```bash
-# Habilitar Chatwoot Enterprise
-curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
-```
-
-Para testar comandos de um branch diferente:
-
-```bash
-REPO_RAW=https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/meu-branch \
-  curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/meu-branch/cmd/habilitar-chatwoot-enterprise | sudo bash
-```
-
 ---
 
 ## O que é o Fzap
@@ -107,3 +87,14 @@ O arquivo de referência da stack completa está em [`stack-fzap.md`](./stack-fz
 ## Créditos
 
 O padrão de estrutura deste instalador foi inspirado no [SetupOrion](https://github.com/oriondesign2015/SetupOrion), projeto da comunidade OrionDesign. Este projeto é mantido pela Flouds e não é afiliado ou endossado pelo SetupOrion.
+
+---
+
+## Comandos avulsos
+
+Funcionalidades extras que rodam sem o instalador completo:
+
+```bash
+# Habilitar Chatwoot Enterprise
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
+```

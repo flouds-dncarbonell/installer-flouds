@@ -2,8 +2,9 @@
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 ##  Habilitar Chatwoot Enterprise                                          ##
 ##                                                                         ##
-##  Encontra a stack Chatwoot no Docker Swarm, injeta o arquivo            ##
-##  chatwoot_hub.rb como volume no serviço principal e reinicia.           ##
+##  Encontra a stack Chatwoot no Docker Swarm, injeta o volume             ##
+##  chatwoot_hub.rb no YAML da stack e re-deploya. Funciona com Portainer ##
+##  e cobre todos os serviços (rails, sidekiq, worker).                    ##
 ##                                                                         ##
 ##  Uso (sem baixar o instalador inteiro):                                 ##
 ##    curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
@@ -26,27 +27,40 @@ exigir_docker
 HUB_FILE="chatwoot_hub.rb"
 HUB_HOST_PATH="/root/${HUB_FILE}"
 HUB_CONTAINER_PATH="/app/lib/${HUB_FILE}"
+HUB_VOLUME_LINE="      - ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}:ro"
+
+## Padrões de nome de serviço do Chatwoot no Swarm
+PADROES_SERVICO="rails|sidekiq|worker"
 
 ## --- Funções ------------------------------------------------------------
 
-## Encontra o nome da stack e serviço do Chatwoot no Swarm
+## Lista todas as stacks que contenham serviços com nomes de Chatwoot
 encontrar_stack_chatwoot() {
-    local stacks
-    stacks=$(docker stack ls --format "{{.Name}}" 2>/dev/null | grep -i chatwoot || true)
+    local stacks_encontradas=""
 
-    if [ -z "$stacks" ]; then
+    while IFS= read -r stack; do
+        [ -z "$stack" ] && continue
+        if docker stack services "$stack" --format "{{.Name}}" 2>/dev/null | grep -qiE "$PADROES_SERVICO"; then
+            stacks_encontradas="${stacks_encontradas}${stack}"$'\n'
+        fi
+    done < <(docker stack ls --format "{{.Name}}" 2>/dev/null)
+
+    ## Remove linhas vazias
+    stacks_encontradas=$(echo "$stacks_encontradas" | sed '/^$/d')
+
+    if [ -z "$stacks_encontradas" ]; then
         msg_erro "Nenhuma stack Chatwoot encontrada neste servidor."
         echo ""
+        msg_info "O comando procura stacks com serviços chamados rails, sidekiq ou worker."
         msg_info "Instale o Chatwoot antes de habilitar o Enterprise."
         exit 1
     fi
 
-    ## Se houver mais de uma, lista para o usuário escolher
     local count
-    count=$(echo "$stacks" | wc -l)
+    count=$(echo "$stacks_encontradas" | wc -l)
 
     if [ "$count" -eq 1 ]; then
-        echo "$stacks"
+        echo "$stacks_encontradas"
         return
     fi
 
@@ -55,14 +69,15 @@ encontrar_stack_chatwoot() {
     echo ""
     local i=1
     while IFS= read -r stack; do
+        [ -z "$stack" ] && continue
         echo -e " $amarelo[$i]$reset $stack"
         i=$((i + 1))
-    done <<< "$stacks"
+    done <<< "$stacks_encontradas"
     echo ""
     read -rp "Escolha [1-$((count))]: " escolha
 
     local selecionada
-    selecionada=$(echo "$stacks" | sed -n "${escolha}p")
+    selecionada=$(echo "$stacks_encontradas" | sed -n "${escolha}p")
     if [ -z "$selecionada" ]; then
         msg_erro "Opção inválida."
         exit 1
@@ -70,48 +85,208 @@ encontrar_stack_chatwoot() {
     echo "$selecionada"
 }
 
-## Encontra o serviço principal (rails/web) dentro da stack
-encontrar_servico_chatwoot() {
+## Encontra o arquivo YAML da stack no servidor
+encontrar_yaml_stack() {
     local stack="$1"
-    local servicos
-    servicos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null | grep -iE 'rails|web|app' || true)
 
-    if [ -z "$servicos" ]; then
-        ## Fallback: pega o primeiro serviço da stack
-        servicos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null | head -1 || true)
+    ## Procura em locais comuns
+    local candidatos=(
+        "/root/${stack}.yaml"
+        "/root/${stack}.yml"
+        "/root/chatwoot/${stack}.yaml"
+        "/root/chatwoot/${stack}.yml"
+        "/root/docker/${stack}.yaml"
+        "/root/docker/${stack}.yml"
+    )
+
+    ## Também procura pelo YAML que gerou a stack (docker stack deploy -c <file>)
+    ## checando labels do serviço
+    local yaml_from_label
+    yaml_from_label=$(docker service ls --filter "label=com.docker.stack.namespace=${stack}" --format "{{.Name}}" 2>/dev/null | head -1)
+    if [ -n "$yaml_from_label" ]; then
+        local compose_path
+        compose_path=$(docker service inspect "$yaml_from_label" --format '{{index .Spec.Labels "com.docker.compose.project.config_files"}}' 2>/dev/null || true)
+        if [ -n "$compose_path" ] && [ -f "$compose_path" ]; then
+            echo "$compose_path"
+            return
+        fi
     fi
 
-    if [ -z "$servicos" ]; then
+    for arquivo in "${candidatos[@]}"; do
+        if [ -f "$arquivo" ]; then
+            echo "$arquivo"
+            return
+        fi
+    done
+
+    ## Não encontrou — pergunta ao usuário
+    echo ""
+    msg_info "Não encontrei o arquivo YAML da stack ${stack}."
+    echo -en "$amarelo Caminho do arquivo (ex: /root/chatwoot.yaml): $reset"
+    read -r yaml_path
+
+    if [ ! -f "$yaml_path" ]; then
+        msg_erro "Arquivo não encontrado: $yaml_path"
+        exit 1
+    fi
+    echo "$yaml_path"
+}
+
+## Lista todos os serviços da stack, marca candidatos, e deixa o usuário escolher
+selecionar_servicos() {
+    local stack="$1"
+    local todos
+    todos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null)
+
+    if [ -z "$todos" ]; then
         msg_erro "Nenhum serviço encontrado na stack $stack."
         exit 1
     fi
 
-    ## Se mais de um, escolhe
-    local count
-    count=$(echo "$servicos" | wc -l)
-    if [ "$count" -eq 1 ]; then
-        echo "$servicos"
-        return
-    fi
+    echo ""
+    msg_info "Serviços na stack ${stack}:"
+    echo ""
+    echo -e "  $amarelo #$reset   $amarelo Serviço$reset                          $amarelo Candidato$reset"
+    echo -e "  ─── ─────────────────────────────── ─────────"
 
-    echo ""
-    msg_info "Mais de um serviço encontrado. Escolha onde injetar o ${HUB_FILE}:"
-    echo ""
     local i=1
+    local candidatos=""
     while IFS= read -r svc; do
-        echo -e " $amarelo[$i]$reset $svc"
+        [ -z "$svc" ] && continue
+        local e_candidato=""
+        if echo "$svc" | grep -qiE "$PADROES_SERVICO"; then
+            e_candidato="$verde✔$reset"
+            candidatos="${candidatos}${i} "
+        else
+            e_candidato="$bege—$reset"
+        fi
+        printf "  $amarelo[%2d]$reset %-35s %b\n" "$i" "$svc" "$e_candidato"
         i=$((i + 1))
-    done <<< "$servicos"
-    echo ""
-    read -rp "Escolha [1-$((count))]: " escolha
+    done <<< "$todos"
 
-    local selecionado
-    selecionado=$(echo "$servicos" | sed -n "${escolha}p")
-    if [ -z "$selecionado" ]; then
-        msg_erro "Opção inválida."
+    echo ""
+    echo -e "  $bege Candidatos = serviços com nome rails, sidekiq ou worker$reset"
+    echo ""
+
+    local total=$((i - 1))
+    local sugestao=""
+    [ -n "$candidatos" ] && sugestao=$(echo "$candidatos" | tr -s ' ' ',' | sed 's/^,//;s/,$//')
+
+    echo -en "$amarelo Selecione os serviços (ex: 1,3,5) [Enter=$sugestao]: $reset"
+    read -r escolha
+
+    [ -z "$escolha" ] && escolha="$sugestao"
+
+    ## Valida e resolve nomes
+    local selecionados=""
+    IFS=',' read -ra indices <<< "$escolha"
+    for idx in "${indices[@]}"; do
+        idx=$(echo "$idx" | tr -d ' ')
+        if ! echo "$idx" | grep -qE '^[0-9]+$' || [ "$idx" -lt 1 ] || [ "$idx" -gt "$total" ]; then
+            msg_erro "Índice inválido: $idx"
+            exit 1
+        fi
+        local nome
+        nome=$(echo "$todos" | sed -n "${idx}p")
+        selecionados="${selecionados}${nome}"$'\n'
+    done
+
+    echo "$selecionados" | sed '/^$/d'
+}
+
+## Verifica se o volume já está no YAML
+volume_ja_no_yaml() {
+    local yaml_path="$1"
+    grep -q "${HUB_HOST_PATH}" "$yaml_path" 2>/dev/null
+}
+
+## Injeta o volume no YAML em todos os serviços relevantes
+injetar_no_yaml() {
+    local yaml_path="$1"
+    local backup="${yaml_path}.bak.$(date +%Y%m%d%H%M%S)"
+
+    ## Backup
+    cp "$yaml_path" "$backup"
+    msg_ok "Backup salvo em ${backup}"
+
+    ## Para cada serviço que tem volumes:, adiciona a linha após a última linha de volume
+    ## Usa awk para injetar de forma precisa
+    local tmp
+    tmp=$(mktemp)
+
+    awk -v vol_line="$HUB_VOLUME_LINE" -v hub_path="$HUB_HOST_PATH" '
+    BEGIN { in_volumes = 0; injected = 0 }
+
+    ## Detecta bloco volumes: dentro de um serviço
+    /^[[:space:]]*volumes:/ {
+        in_volumes = 1
+        print
+        next
+    }
+
+    ## Se estamos num bloco volumes e a linha é um volume existente (indentado)
+    in_volumes && /^[[:space:]]*- / {
+        ## Verifica se este volume já é o chatwoot_hub
+        if ($0 ~ hub_path) {
+            injected = 1
+        }
+        print
+        next
+    }
+
+    ## Saiu do bloco volumes — injeta antes de sair se ainda não injetou
+    in_volumes && !/^[[:space:]]*- / && !/^[[:space:]]*$/ {
+        if (!injected) {
+            print vol_line
+            injected = 1
+        }
+        in_volumes = 0
+        print
+        next
+    }
+
+    ## Linha vazia saindo de volumes
+    in_volumes && /^[[:space:]]*$/ {
+        if (!injected) {
+            print vol_line
+            injected = 1
+        }
+        in_volumes = 0
+        print
+        next
+    }
+
+    ## Reset ao encontrar novo serviço
+    /^[[:space:]]*[a-z]/{ in_volumes = 0; injected = 0 }
+
+    { print }
+    ' "$yaml_path" > "$tmp"
+
+    ## Verifica se algo mudou
+    if ! diff -q "$yaml_path" "$tmp" >/dev/null 2>&1; then
+        mv "$tmp" "$yaml_path"
+        msg_ok "Volume injetado no YAML: ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}:ro"
+    else
+        rm "$tmp"
+        msg_ok "Volume já presente no YAML."
+    fi
+}
+
+## Faz re-deploy da stack com o YAML atualizado
+redeploy_stack() {
+    local stack="$1"
+    local yaml_path="$2"
+
+    msg_info "Re-deployando stack ${stack}..."
+    docker stack deploy --detach=true --resolve-image always -c "$yaml_path" "$stack" >/dev/null 2>&1
+
+    if [ $? -eq 0 ]; then
+        msg_ok "Stack ${stack} re-deployada com sucesso."
+    else
+        msg_erro "Falha ao re-deployar a stack."
+        msg_info "O backup do YAML anterior foi mantido. Restaure manualmente se necessário."
         exit 1
     fi
-    echo "$selecionado"
 }
 
 ## Baixa o chatwoot_hub.rb do repositório
@@ -119,40 +294,6 @@ baixar_hub() {
     msg_info "Baixando ${HUB_FILE}..."
     curl -fsSL "$REPO_RAW/${HUB_FILE}" -o "$HUB_HOST_PATH"
     msg_ok "${HUB_FILE} salvo em ${HUB_HOST_PATH}"
-}
-
-## Verifica se o volume já está configurado no serviço
-volume_ja_configurado() {
-    local servico="$1"
-    docker service inspect "$servico" --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Source}}:{{.Target}} {{end}}' 2>/dev/null \
-        | grep -q "${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}" 2>/dev/null
-}
-
-## Adiciona o volume no serviço e força reinício
-injetar_volume() {
-    local stack="$1"
-    local servico="$2"
-
-    if volume_ja_configurado "$servico"; then
-        msg_ok "Volume ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH} já está configurado em ${servico}."
-        msg_info "Forçando reinício do serviço..."
-        docker service update --force "$servico" >/dev/null 2>&1
-        msg_ok "Serviço reiniciado."
-        return
-    fi
-
-    msg_info "Injetando volume ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH} em ${servico}..."
-    docker service update \
-        --mount-add type=bind,source="${HUB_HOST_PATH}",target="${HUB_CONTAINER_PATH}",readonly \
-        "$servico" >/dev/null 2>&1
-
-    if [ $? -eq 0 ]; then
-        msg_ok "Volume injetado e serviço reiniciado com sucesso."
-    else
-        msg_erro "Falha ao injetar o volume. Verifique se o serviço suporta mount dinâmico."
-        msg_info "Alternativa: atualize o YAML da stack via Portainer e re-deploy."
-        exit 1
-    fi
 }
 
 ## --- Principal ----------------------------------------------------------
@@ -168,8 +309,8 @@ echo ""
 echo -e "$branco Este comando vai:$reset"
 echo -e "$branco   1. Baixar o arquivo chatwoot_hub.rb para /root/$reset"
 echo -e "$branco   2. Encontrar a stack Chatwoot no Docker Swarm$reset"
-echo -e "$branco   3. Injetar o arquivo como volume no serviço principal$reset"
-echo -e "$branco   4. Reiniciar o serviço para aplicar$reset"
+echo -e "$branco   3. Injetar o volume no YAML da stack (rails + sidekiq + worker)$reset"
+echo -e "$branco   4. Re-deployar a stack$reset"
 echo ""
 read -rp "Deseja continuar? (Y/N): " confirmar
 if [ "$confirmar" != "Y" ] && [ "$confirmar" != "y" ]; then
@@ -188,13 +329,29 @@ STACK_CHATWOOT=$(encontrar_stack_chatwoot)
 msg_ok "Stack encontrada: $STACK_CHATWOOT"
 echo ""
 
-## Passo 3: encontrar o serviço
-SERVICO_CHATWOOT=$(encontrar_servico_chatwoot "$STACK_CHATWOOT")
-msg_ok "Serviço selecionado: $SERVICO_CHATWOOT"
+## Passo 3: selecionar serviços
+SERVICOS_ALVO=$(selecionar_servicos "$STACK_CHATWOOT")
+
+echo ""
+msg_info "Serviços selecionados:"
+echo "$SERVICOS_ALVO" | while read -r svc; do
+    echo -e "  $verde•$reset $svc"
+done
 echo ""
 
-## Passo 4: injetar e reiniciar
-injetar_volume "$STACK_CHATWOOT" "$SERVICO_CHATWOOT"
+## Passo 4: encontrar o YAML e injetar
+YAML_PATH=$(encontrar_yaml_stack "$STACK_CHATWOOT")
+msg_ok "YAML encontrado: $YAML_PATH"
+
+if volume_ja_no_yaml "$YAML_PATH"; then
+    msg_ok "Volume já está no YAML. Pulando injeção."
+else
+    injetar_no_yaml "$YAML_PATH"
+fi
+echo ""
+
+## Passo 5: re-deploy
+redeploy_stack "$STACK_CHATWOOT" "$YAML_PATH"
 echo ""
 
 ## Resultado
@@ -206,8 +363,13 @@ echo -e "$verde=================================================================
 echo ""
 echo -e "$amarelo Arquivo:$branco ${HUB_HOST_PATH}$reset"
 echo -e "$amarelo Montado em:$branco ${HUB_CONTAINER_PATH}$reset"
-echo -e "$amarelo Serviço:$branco ${SERVICO_CHATWOOT}$reset"
+echo -e "$amarelo YAML:$branco ${YAML_PATH}$reset"
 echo ""
-echo -e "$bege ℹ Se o serviço não reconhecer o arquivo automaticamente,$reset"
-echo -e "$bege   pode ser necessário reiniciar o container via Portainer.$reset"
+echo -e "$amarelo Serviços afetados:$reset"
+echo "$SERVICOS_ALVO" | while read -r svc; do
+    echo -e "  $verde•$reset $svc"
+done
+echo ""
+echo -e "$bege ℹ O YAML original foi backupeado no mesmo diretório.$reset"
+echo -e "$bege ℹ Se usar Portainer, a stack aparecerá atualizada automaticamente.$reset"
 echo ""
