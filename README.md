@@ -95,6 +95,9 @@ O padrão de estrutura deste instalador foi inspirado no [SetupOrion](https://gi
 Funcionalidades extras que rodam sem o instalador completo:
 
 ```bash
-# Habilitar Chatwoot Enterprise
-curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
+# Chatwoot Enterprise (habilitar)
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/chatwoot-enterprise | sudo bash
+
+# Chatwoot Enterprise (desabilitar)
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/chatwoot-enterprise | sudo bash -s -- --disable
 ```

@@ -1,13 +1,10 @@
 #!/bin/bash
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
-##  Habilitar Chatwoot Enterprise                                          ##
-##                                                                         ##
-##  Encontra a stack Chatwoot no Docker Swarm, injeta o volume             ##
-##  chatwoot_hub.rb no YAML da stack e re-deploya. Funciona com Portainer ##
-##  e cobre todos os serviços (rails, sidekiq, worker).                    ##
+##  Chatwoot Enterprise — Habilitar / Desabilitar                          ##
 ##                                                                         ##
 ##  Uso (sem baixar o instalador inteiro):                                 ##
-##    curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
+##    curl -fsSL .../cmd/chatwoot-enterprise | sudo bash                   ##
+##    curl -fsSL .../cmd/chatwoot-enterprise | sudo bash -s -- --disable   ##
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
 set -euo pipefail
@@ -28,9 +25,15 @@ HUB_FILE="chatwoot_hub.rb"
 HUB_HOST_PATH="/root/${HUB_FILE}"
 HUB_CONTAINER_PATH="/app/lib/${HUB_FILE}"
 HUB_VOLUME_LINE="      - ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}:ro"
-
-## Padrões de nome de serviço do Chatwoot no Swarm
 PADROES_SERVICO="rails|sidekiq|worker"
+
+## --- Argumento --disable ------------------------------------------------
+MODO="habilitar"
+for arg in "$@"; do
+    case "$arg" in
+        --disable|-d) MODO="desabilitar" ;;
+    esac
+done
 
 ## --- Funções ------------------------------------------------------------
 
@@ -45,14 +48,13 @@ encontrar_stack_chatwoot() {
         fi
     done < <(docker stack ls --format "{{.Name}}" 2>/dev/null)
 
-    ## Remove linhas vazias
     stacks_encontradas=$(echo "$stacks_encontradas" | sed '/^$/d')
 
     if [ -z "$stacks_encontradas" ]; then
         msg_erro "Nenhuma stack Chatwoot encontrada neste servidor."
         echo ""
         msg_info "O comando procura stacks com serviços chamados rails, sidekiq ou worker."
-        msg_info "Instale o Chatwoot antes de habilitar o Enterprise."
+        msg_info "Instale o Chatwoot antes de usar este comando."
         exit 1
     fi
 
@@ -89,7 +91,6 @@ encontrar_stack_chatwoot() {
 encontrar_yaml_stack() {
     local stack="$1"
 
-    ## Procura em locais comuns
     local candidatos=(
         "/root/${stack}.yaml"
         "/root/${stack}.yml"
@@ -99,8 +100,6 @@ encontrar_yaml_stack() {
         "/root/docker/${stack}.yml"
     )
 
-    ## Também procura pelo YAML que gerou a stack (docker stack deploy -c <file>)
-    ## checando labels do serviço
     local yaml_from_label
     yaml_from_label=$(docker service ls --filter "label=com.docker.stack.namespace=${stack}" --format "{{.Name}}" 2>/dev/null | head -1)
     if [ -n "$yaml_from_label" ]; then
@@ -119,7 +118,6 @@ encontrar_yaml_stack() {
         fi
     done
 
-    ## Não encontrou — pergunta ao usuário
     echo ""
     msg_info "Não encontrei o arquivo YAML da stack ${stack}."
     echo -en "$amarelo Caminho do arquivo (ex: /root/chatwoot.yaml): $reset"
@@ -177,7 +175,6 @@ selecionar_servicos() {
 
     [ -z "$escolha" ] && escolha="$sugestao"
 
-    ## Valida e resolve nomes
     local selecionados=""
     IFS=',' read -ra indices <<< "$escolha"
     for idx in "${indices[@]}"; do
@@ -200,33 +197,27 @@ volume_ja_no_yaml() {
     grep -q "${HUB_HOST_PATH}" "$yaml_path" 2>/dev/null
 }
 
-## Injeta o volume no YAML em todos os serviços relevantes
+## Injeta o volume no YAML nos serviços selecionados
 injetar_no_yaml() {
     local yaml_path="$1"
     local backup="${yaml_path}.bak.$(date +%Y%m%d%H%M%S)"
 
-    ## Backup
     cp "$yaml_path" "$backup"
     msg_ok "Backup salvo em ${backup}"
 
-    ## Para cada serviço que tem volumes:, adiciona a linha após a última linha de volume
-    ## Usa awk para injetar de forma precisa
     local tmp
     tmp=$(mktemp)
 
     awk -v vol_line="$HUB_VOLUME_LINE" -v hub_path="$HUB_HOST_PATH" '
     BEGIN { in_volumes = 0; injected = 0 }
 
-    ## Detecta bloco volumes: dentro de um serviço
     /^[[:space:]]*volumes:/ {
         in_volumes = 1
         print
         next
     }
 
-    ## Se estamos num bloco volumes e a linha é um volume existente (indentado)
     in_volumes && /^[[:space:]]*- / {
-        ## Verifica se este volume já é o chatwoot_hub
         if ($0 ~ hub_path) {
             injected = 1
         }
@@ -234,7 +225,6 @@ injetar_no_yaml() {
         next
     }
 
-    ## Saiu do bloco volumes — injeta antes de sair se ainda não injetou
     in_volumes && !/^[[:space:]]*- / && !/^[[:space:]]*$/ {
         if (!injected) {
             print vol_line
@@ -245,7 +235,6 @@ injetar_no_yaml() {
         next
     }
 
-    ## Linha vazia saindo de volumes
     in_volumes && /^[[:space:]]*$/ {
         if (!injected) {
             print vol_line
@@ -256,13 +245,11 @@ injetar_no_yaml() {
         next
     }
 
-    ## Reset ao encontrar novo serviço
     /^[[:space:]]*[a-z]/{ in_volumes = 0; injected = 0 }
 
     { print }
     ' "$yaml_path" > "$tmp"
 
-    ## Verifica se algo mudou
     if ! diff -q "$yaml_path" "$tmp" >/dev/null 2>&1; then
         mv "$tmp" "$yaml_path"
         msg_ok "Volume injetado no YAML: ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}:ro"
@@ -272,7 +259,29 @@ injetar_no_yaml() {
     fi
 }
 
-## Faz re-deploy da stack com o YAML atualizado
+## Remove o volume do YAML
+remover_do_yaml() {
+    local yaml_path="$1"
+    local backup="${yaml_path}.bak.$(date +%Y%m%d%H%M%S)"
+
+    cp "$yaml_path" "$backup"
+    msg_ok "Backup salvo em ${backup}"
+
+    local tmp
+    tmp=$(mktemp)
+
+    grep -v "${HUB_HOST_PATH}" "$yaml_path" > "$tmp"
+
+    if ! diff -q "$yaml_path" "$tmp" >/dev/null 2>&1; then
+        mv "$tmp" "$yaml_path"
+        msg_ok "Volume removido do YAML."
+    else
+        rm "$tmp"
+        msg_ok "Volume não encontrado no YAML."
+    fi
+}
+
+## Re-deploy da stack
 redeploy_stack() {
     local stack="$1"
     local yaml_path="$2"
@@ -296,21 +305,40 @@ baixar_hub() {
     msg_ok "${HUB_FILE} salvo em ${HUB_HOST_PATH}"
 }
 
+## Remove o chatwoot_hub.rb do host
+remover_hub() {
+    if [ -f "$HUB_HOST_PATH" ]; then
+        rm "$HUB_HOST_PATH"
+        msg_ok "${HUB_HOST_PATH} removido."
+    else
+        msg_ok "${HUB_HOST_PATH} não encontrado no host."
+    fi
+}
+
 ## --- Principal ----------------------------------------------------------
 
 clear
 echo ""
 echo -e "$amarelo====================================================================================================$reset"
 echo -e "$amarelo=                                                                                                  =$reset"
-echo -e "$amarelo=                  $branco Habilitar Chatwoot Enterprise$amarelo                                               =$reset"
+echo -e "$amarelo=                  $branco Chatwoot Enterprise — $MODO$amarelo                                               =$reset"
 echo -e "$amarelo=                                                                                                  =$reset"
 echo -e "$amarelo====================================================================================================$reset"
 echo ""
-echo -e "$branco Este comando vai:$reset"
-echo -e "$branco   1. Baixar o arquivo chatwoot_hub.rb para /root/$reset"
-echo -e "$branco   2. Encontrar a stack Chatwoot no Docker Swarm$reset"
-echo -e "$branco   3. Injetar o volume no YAML da stack (rails + sidekiq + worker)$reset"
-echo -e "$branco   4. Re-deployar a stack$reset"
+
+if [ "$MODO" = "habilitar" ]; then
+    echo -e "$branco Este comando vai:$reset"
+    echo -e "$branco   1. Baixar o arquivo chatwoot_hub.rb para /root/$reset"
+    echo -e "$branco   2. Encontrar a stack Chatwoot no Docker Swarm$reset"
+    echo -e "$branco   3. Injetar o volume no YAML da stack$reset"
+    echo -e "$branco   4. Re-deployar a stack$reset"
+else
+    echo -e "$branco Este comando vai:$reset"
+    echo -e "$branco   1. Encontrar a stack Chatwoot no Docker Swarm$reset"
+    echo -e "$branco   2. Remover o volume do YAML da stack$reset"
+    echo -e "$branco   3. Re-deployar a stack$reset"
+    echo -e "$branco   4. Remover o arquivo chatwoot_hub.rb do host$reset"
+fi
 echo ""
 read -rp "Deseja continuar? (Y/N): " confirmar
 if [ "$confirmar" != "Y" ] && [ "$confirmar" != "y" ]; then
@@ -320,56 +348,97 @@ if [ "$confirmar" != "Y" ] && [ "$confirmar" != "y" ]; then
 fi
 echo ""
 
-## Passo 1: baixar o arquivo
-baixar_hub
-echo ""
-
-## Passo 2: encontrar a stack
+## Passo 1: stack
 STACK_CHATWOOT=$(encontrar_stack_chatwoot)
 msg_ok "Stack encontrada: $STACK_CHATWOOT"
 echo ""
 
-## Passo 3: selecionar serviços
-SERVICOS_ALVO=$(selecionar_servicos "$STACK_CHATWOOT")
+if [ "$MODO" = "habilitar" ]; then
 
-echo ""
-msg_info "Serviços selecionados:"
-echo "$SERVICOS_ALVO" | while read -r svc; do
-    echo -e "  $verde•$reset $svc"
-done
-echo ""
+    ## Passo 2: baixar hub
+    baixar_hub
+    echo ""
 
-## Passo 4: encontrar o YAML e injetar
-YAML_PATH=$(encontrar_yaml_stack "$STACK_CHATWOOT")
-msg_ok "YAML encontrado: $YAML_PATH"
+    ## Passo 3: selecionar serviços
+    SERVICOS_ALVO=$(selecionar_servicos "$STACK_CHATWOOT")
 
-if volume_ja_no_yaml "$YAML_PATH"; then
-    msg_ok "Volume já está no YAML. Pulando injeção."
+    echo ""
+    msg_info "Serviços selecionados:"
+    echo "$SERVICOS_ALVO" | while read -r svc; do
+        echo -e "  $verde•$reset $svc"
+    done
+    echo ""
+
+    ## Passo 4: YAML e injetar
+    YAML_PATH=$(encontrar_yaml_stack "$STACK_CHATWOOT")
+    msg_ok "YAML encontrado: $YAML_PATH"
+
+    if volume_ja_no_yaml "$YAML_PATH"; then
+        msg_ok "Volume já está no YAML. Pulando injeção."
+    else
+        injetar_no_yaml "$YAML_PATH"
+    fi
+    echo ""
+
+    ## Passo 5: re-deploy
+    redeploy_stack "$STACK_CHATWOOT" "$YAML_PATH"
+    echo ""
+
+    ## Resultado
+    echo -e "$verde====================================================================================================$reset"
+    echo -e "$verde=                                                                                                  =$reset"
+    echo -e "$verde=  $branco Chatwoot Enterprise habilitado!$verde                                                         =$reset"
+    echo -e "$verde=                                                                                                  =$reset"
+    echo -e "$verde====================================================================================================$reset"
+    echo ""
+    echo -e "$amarelo Arquivo:$branco ${HUB_HOST_PATH}$reset"
+    echo -e "$amarelo Montado em:$branco ${HUB_CONTAINER_PATH}$reset"
+    echo -e "$amarelo YAML:$branco ${YAML_PATH}$reset"
+    echo ""
+    echo -e "$amarelo Serviços afetados:$reset"
+    echo "$SERVICOS_ALVO" | while read -r svc; do
+        echo -e "  $verde•$reset $svc"
+    done
+    echo ""
+    echo -e "$bege Para desabilitar:$reset"
+    echo -e "$bege   curl -fsSL .../cmd/chatwoot-enterprise | sudo bash -s -- --disable$reset"
+    echo ""
+
 else
-    injetar_no_yaml "$YAML_PATH"
+
+    ## MODO DESABILITAR
+
+    ## Passo 2: YAML e remover
+    YAML_PATH=$(encontrar_yaml_stack "$STACK_CHATWOOT")
+    msg_ok "YAML encontrado: $YAML_PATH"
+
+    if volume_ja_no_yaml "$YAML_PATH"; then
+        remover_do_yaml "$YAML_PATH"
+    else
+        msg_ok "Volume não está no YAML. Nada a remover."
+    fi
+    echo ""
+
+    ## Passo 3: re-deploy
+    redeploy_stack "$STACK_CHATWOOT" "$YAML_PATH"
+    echo ""
+
+    ## Passo 4: remover arquivo do host
+    remover_hub
+    echo ""
+
+    ## Resultado
+    echo -e "$verde====================================================================================================$reset"
+    echo -e "$verde=                                                                                                  =$reset"
+    echo -e "$verde=  $branco Chatwoot Enterprise desabilitado!$verde                                                       =$reset"
+    echo -e "$verde=                                                                                                  =$reset"
+    echo -e "$verde====================================================================================================$reset"
+    echo ""
+    echo -e "$amarelo Volume removido do YAML:$branco ${YAML_PATH}$reset"
+    echo -e "$amarelo Arquivo removido:$branco ${HUB_HOST_PATH}$reset"
+    echo ""
+    echo -e "$bege Para habilitar novamente:$reset"
+    echo -e "$bege   curl -fsSL .../cmd/chatwoot-enterprise | sudo bash$reset"
+    echo ""
+
 fi
-echo ""
-
-## Passo 5: re-deploy
-redeploy_stack "$STACK_CHATWOOT" "$YAML_PATH"
-echo ""
-
-## Resultado
-echo -e "$verde====================================================================================================$reset"
-echo -e "$verde=                                                                                                  =$reset"
-echo -e "$verde=  $branco Chatwoot Enterprise habilitado com sucesso!$verde                                              =$reset"
-echo -e "$verde=                                                                                                  =$reset"
-echo -e "$verde====================================================================================================$reset"
-echo ""
-echo -e "$amarelo Arquivo:$branco ${HUB_HOST_PATH}$reset"
-echo -e "$amarelo Montado em:$branco ${HUB_CONTAINER_PATH}$reset"
-echo -e "$amarelo YAML:$branco ${YAML_PATH}$reset"
-echo ""
-echo -e "$amarelo Serviços afetados:$reset"
-echo "$SERVICOS_ALVO" | while read -r svc; do
-    echo -e "  $verde•$reset $svc"
-done
-echo ""
-echo -e "$bege ℹ O YAML original foi backupeado no mesmo diretório.$reset"
-echo -e "$bege ℹ Se usar Portainer, a stack aparecerá atualizada automaticamente.$reset"
-echo ""
