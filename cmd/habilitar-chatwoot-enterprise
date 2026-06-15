@@ -1,0 +1,213 @@
+#!/bin/bash
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+##  Habilitar Chatwoot Enterprise                                          ##
+##                                                                         ##
+##  Encontra a stack Chatwoot no Docker Swarm, injeta o arquivo            ##
+##  chatwoot_hub.rb como volume no serviço principal e reinicia.           ##
+##                                                                         ##
+##  Uso (sem baixar o instalador inteiro):                                 ##
+##    curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/habilitar-chatwoot-enterprise | sudo bash
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+set -euo pipefail
+
+REPO_RAW="${REPO_RAW:-https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main}"
+
+## Carrega funções comuns
+if ! source <(curl -fsSL "$REPO_RAW/lib/common.sh"); then
+    echo "Falha ao carregar lib/common.sh. Verifique a conexão." >&2
+    exit 1
+fi
+
+exigir_root
+exigir_docker
+
+## --- Constantes ---------------------------------------------------------
+HUB_FILE="chatwoot_hub.rb"
+HUB_HOST_PATH="/root/${HUB_FILE}"
+HUB_CONTAINER_PATH="/app/lib/${HUB_FILE}"
+
+## --- Funções ------------------------------------------------------------
+
+## Encontra o nome da stack e serviço do Chatwoot no Swarm
+encontrar_stack_chatwoot() {
+    local stacks
+    stacks=$(docker stack ls --format "{{.Name}}" 2>/dev/null | grep -i chatwoot || true)
+
+    if [ -z "$stacks" ]; then
+        msg_erro "Nenhuma stack Chatwoot encontrada neste servidor."
+        echo ""
+        msg_info "Instale o Chatwoot antes de habilitar o Enterprise."
+        exit 1
+    fi
+
+    ## Se houver mais de uma, lista para o usuário escolher
+    local count
+    count=$(echo "$stacks" | wc -l)
+
+    if [ "$count" -eq 1 ]; then
+        echo "$stacks"
+        return
+    fi
+
+    echo ""
+    msg_info "Mais de uma stack Chatwoot encontrada:"
+    echo ""
+    local i=1
+    while IFS= read -r stack; do
+        echo -e " $amarelo[$i]$reset $stack"
+        i=$((i + 1))
+    done <<< "$stacks"
+    echo ""
+    read -rp "Escolha [1-$((count))]: " escolha
+
+    local selecionada
+    selecionada=$(echo "$stacks" | sed -n "${escolha}p")
+    if [ -z "$selecionada" ]; then
+        msg_erro "Opção inválida."
+        exit 1
+    fi
+    echo "$selecionada"
+}
+
+## Encontra o serviço principal (rails/web) dentro da stack
+encontrar_servico_chatwoot() {
+    local stack="$1"
+    local servicos
+    servicos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null | grep -iE 'rails|web|app' || true)
+
+    if [ -z "$servicos" ]; then
+        ## Fallback: pega o primeiro serviço da stack
+        servicos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null | head -1 || true)
+    fi
+
+    if [ -z "$servicos" ]; then
+        msg_erro "Nenhum serviço encontrado na stack $stack."
+        exit 1
+    fi
+
+    ## Se mais de um, escolhe
+    local count
+    count=$(echo "$servicos" | wc -l)
+    if [ "$count" -eq 1 ]; then
+        echo "$servicos"
+        return
+    fi
+
+    echo ""
+    msg_info "Mais de um serviço encontrado. Escolha onde injetar o ${HUB_FILE}:"
+    echo ""
+    local i=1
+    while IFS= read -r svc; do
+        echo -e " $amarelo[$i]$reset $svc"
+        i=$((i + 1))
+    done <<< "$servicos"
+    echo ""
+    read -rp "Escolha [1-$((count))]: " escolha
+
+    local selecionado
+    selecionado=$(echo "$servicos" | sed -n "${escolha}p")
+    if [ -z "$selecionado" ]; then
+        msg_erro "Opção inválida."
+        exit 1
+    fi
+    echo "$selecionado"
+}
+
+## Baixa o chatwoot_hub.rb do repositório
+baixar_hub() {
+    msg_info "Baixando ${HUB_FILE}..."
+    curl -fsSL "$REPO_RAW/${HUB_FILE}" -o "$HUB_HOST_PATH"
+    msg_ok "${HUB_FILE} salvo em ${HUB_HOST_PATH}"
+}
+
+## Verifica se o volume já está configurado no serviço
+volume_ja_configurado() {
+    local servico="$1"
+    docker service inspect "$servico" --format '{{range .Spec.TaskTemplate.ContainerSpec.Mounts}}{{.Source}}:{{.Target}} {{end}}' 2>/dev/null \
+        | grep -q "${HUB_HOST_PATH}:${HUB_CONTAINER_PATH}" 2>/dev/null
+}
+
+## Adiciona o volume no serviço e força reinício
+injetar_volume() {
+    local stack="$1"
+    local servico="$2"
+
+    if volume_ja_configurado "$servico"; then
+        msg_ok "Volume ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH} já está configurado em ${servico}."
+        msg_info "Forçando reinício do serviço..."
+        docker service update --force "$servico" >/dev/null 2>&1
+        msg_ok "Serviço reiniciado."
+        return
+    fi
+
+    msg_info "Injetando volume ${HUB_HOST_PATH}:${HUB_CONTAINER_PATH} em ${servico}..."
+    docker service update \
+        --mount-add type=bind,source="${HUB_HOST_PATH}",target="${HUB_CONTAINER_PATH}",readonly \
+        "$servico" >/dev/null 2>&1
+
+    if [ $? -eq 0 ]; then
+        msg_ok "Volume injetado e serviço reiniciado com sucesso."
+    else
+        msg_erro "Falha ao injetar o volume. Verifique se o serviço suporta mount dinâmico."
+        msg_info "Alternativa: atualize o YAML da stack via Portainer e re-deploy."
+        exit 1
+    fi
+}
+
+## --- Principal ----------------------------------------------------------
+
+clear
+echo ""
+echo -e "$amarelo====================================================================================================$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo=                  $branco Habilitar Chatwoot Enterprise$amarelo                                               =$reset"
+echo -e "$amarelo=                                                                                                  =$reset"
+echo -e "$amarelo====================================================================================================$reset"
+echo ""
+echo -e "$branco Este comando vai:$reset"
+echo -e "$branco   1. Baixar o arquivo chatwoot_hub.rb para /root/$reset"
+echo -e "$branco   2. Encontrar a stack Chatwoot no Docker Swarm$reset"
+echo -e "$branco   3. Injetar o arquivo como volume no serviço principal$reset"
+echo -e "$branco   4. Reiniciar o serviço para aplicar$reset"
+echo ""
+read -rp "Deseja continuar? (Y/N): " confirmar
+if [ "$confirmar" != "Y" ] && [ "$confirmar" != "y" ]; then
+    echo ""
+    msg_info "Operação cancelada."
+    exit 0
+fi
+echo ""
+
+## Passo 1: baixar o arquivo
+baixar_hub
+echo ""
+
+## Passo 2: encontrar a stack
+STACK_CHATWOOT=$(encontrar_stack_chatwoot)
+msg_ok "Stack encontrada: $STACK_CHATWOOT"
+echo ""
+
+## Passo 3: encontrar o serviço
+SERVICO_CHATWOOT=$(encontrar_servico_chatwoot "$STACK_CHATWOOT")
+msg_ok "Serviço selecionado: $SERVICO_CHATWOOT"
+echo ""
+
+## Passo 4: injetar e reiniciar
+injetar_volume "$STACK_CHATWOOT" "$SERVICO_CHATWOOT"
+echo ""
+
+## Resultado
+echo -e "$verde====================================================================================================$reset"
+echo -e "$verde=                                                                                                  =$reset"
+echo -e "$verde=  $branco Chatwoot Enterprise habilitado com sucesso!$verde                                              =$reset"
+echo -e "$verde=                                                                                                  =$reset"
+echo -e "$verde====================================================================================================$reset"
+echo ""
+echo -e "$amarelo Arquivo:$branco ${HUB_HOST_PATH}$reset"
+echo -e "$amarelo Montado em:$branco ${HUB_CONTAINER_PATH}$reset"
+echo -e "$amarelo Serviço:$branco ${SERVICO_CHATWOOT}$reset"
+echo ""
+echo -e "$bege ℹ Se o serviço não reconhecer o arquivo automaticamente,$reset"
+echo -e "$bege   pode ser necessário reiniciar o container via Portainer.$reset"
+echo ""
