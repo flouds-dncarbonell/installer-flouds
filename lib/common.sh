@@ -32,7 +32,7 @@ read_rs() {
     read -rs -p "$1" "$2" </dev/tty
 }
 read_r() {
-    read -r "$2" </dev/tty
+    read -r "$1" </dev/tty
 }
 
 ## --- Mensagens ----------------------------------------------------------
