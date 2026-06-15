@@ -23,9 +23,17 @@ dados_vps="${home_directory}/dados_vps/dados_vps"
 dados_portainer_file="${home_directory}/dados_vps/dados_portainer"
 
 ## Garante leitura interativa quando carregado via pipe (curl | bash)
-if [ ! -t 0 ] && [ -r /dev/tty ] && { : </dev/tty; } 2>/dev/null; then
-    exec </dev/tty
-fi
+## Não usamos exec </dev/tty porque isso quebra a leitura do resto do pipe
+## em curl | bash. Em vez disso, cada read usa /dev/tty diretamente.
+read_rp() {
+    read -rp "$1" "$2" </dev/tty
+}
+read_rs() {
+    read -rs -p "$1" "$2" </dev/tty
+}
+read_r() {
+    read -r "$2" </dev/tty
+}
 
 ## --- Mensagens ----------------------------------------------------------
 msg_info()  { echo -e "$amarelo$*$reset"; }
