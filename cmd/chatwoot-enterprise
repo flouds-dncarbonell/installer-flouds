@@ -19,7 +19,7 @@ if [ ! -t 0 ]; then
         echo "Falha ao baixar o script." >&2; exit 1
     }
     chmod +x "$tmp_script"
-    exec bash "$tmp_script" "$@"
+    exec bash "$tmp_script" "$@" </dev/tty
 fi
 
 ## Carrega funções comuns
