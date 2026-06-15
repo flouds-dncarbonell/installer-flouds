@@ -87,17 +87,3 @@ O arquivo de referência da stack completa está em [`stack-fzap.md`](./stack-fz
 ## Créditos
 
 O padrão de estrutura deste instalador foi inspirado no [SetupOrion](https://github.com/oriondesign2015/SetupOrion), projeto da comunidade OrionDesign. Este projeto é mantido pela Flouds e não é afiliado ou endossado pelo SetupOrion.
-
----
-
-## Comandos avulsos
-
-Funcionalidades extras que rodam sem o instalador completo:
-
-```bash
-# Chatwoot Enterprise (habilitar)
-curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/chatwoot-enterprise | sudo bash
-
-# Chatwoot Enterprise (desabilitar)
-curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/cmd/chatwoot-enterprise | sudo bash -s -- --disable
-```
