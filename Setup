@@ -22,7 +22,7 @@ detectar_sistema() {
     case "${ID:-}" in
         ubuntu|debian)
             gerenciador_pacotes="apt"
-            pacotes=(ca-certificates curl git jq apache2-utils)
+            pacotes=(ca-certificates curl git jq)
             ;;
         rhel|centos|rocky|almalinux|fedora)
             if command -v dnf >/dev/null 2>&1; then
@@ -30,7 +30,7 @@ detectar_sistema() {
             else
                 gerenciador_pacotes="yum"
             fi
-            pacotes=(ca-certificates curl git jq httpd-tools)
+            pacotes=(ca-certificates curl git jq)
             ;;
         *)
             falhar "Sistema ${PRETTY_NAME:-${ID:-desconhecido}} não suportado. Use Ubuntu, Debian, RHEL, Rocky, AlmaLinux, CentOS ou Fedora."
