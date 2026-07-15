@@ -7,6 +7,27 @@
 
 versao="1.0.0"
 traefik_image="traefik:v3.6.17"
+portainer_image="portainer/portainer-ce:2.39.5"
+portainer_agent_image="portainer/agent:2.39.5"
+modo_infra=false
+
+## Dados de acesso, hashes e arquivos ACME criados pelo instalador ficam restritos ao root.
+umask 077
+
+for argumento in "$@"; do
+    case "$argumento" in
+        --infra-only) modo_infra=true ;;
+        -h|--help)
+            echo "Uso: $0 [--infra-only]"
+            echo "  --infra-only  instala somente Traefik e Portainer"
+            exit 0
+            ;;
+        *)
+            echo "Opção desconhecida: $argumento" >&2
+            exit 2
+            ;;
+    esac
+done
 
 ## Cores
 amarelo="\e[33m"
@@ -551,7 +572,7 @@ version: "3.7"
 services:
 
   agent:
-    image: portainer/agent:latest
+    image: ${portainer_agent_image}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker/volumes:/var/lib/docker/volumes
@@ -564,8 +585,13 @@ services:
           - node.platform.os == linux
 
   portainer:
-    image: portainer/portainer-ce:latest
-    command: -H tcp://tasks.agent:9001 --tlsskipverify
+    image: ${portainer_image}
+    command:
+      - -H
+      - tcp://tasks.agent:9001
+      - --tlsskipverify
+      - --admin-password
+      - "${pass_hash}"
     volumes:
       - portainer_data:/data
     networks:
@@ -628,11 +654,24 @@ init_portainer_admin() {
     local MAX_RETRIES=4
     local DELAY=15
     local CONTA_CRIADA=false
+    local AUTH_RESPONSE
 
     echo ""
     echo -e "$amarelo• Inicializando conta admin do Portainer...$reset"
 
     for i in $(seq 1 $MAX_RETRIES); do
+        AUTH_RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/auth" \
+            -H "Content-Type: application/json" \
+            -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
+
+        if echo "$AUTH_RESPONSE" | jq -e '.jwt | strings | length > 0' >/dev/null 2>&1; then
+            echo -e "$verde  ✔ Conta de administrador validada com sucesso!$reset"
+            CONTA_CRIADA=true
+            break
+        fi
+
+        ## Compatibilidade com versões anteriores do Portainer. Nas versões
+        ## atuais a conta é criada no startup via --admin-password.
         RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/users/admin/init" \
             -H "Content-Type: application/json" \
             -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
@@ -643,8 +682,8 @@ init_portainer_admin() {
             break
         else
             if [ "$i" -eq "$MAX_RETRIES" ]; then
-                echo -e "$vermelho  ✘ Não foi possível criar a conta admin após $MAX_RETRIES tentativas.$reset"
-                echo -e "$bege    Acesse https://$url_portainer e crie a conta manualmente.$reset"
+                echo -e "$vermelho  ✘ Não foi possível validar a conta admin após $MAX_RETRIES tentativas.$reset"
+                return 1
             else
                 echo -e "$bege    Aguardando Portainer iniciar... ($i/$MAX_RETRIES)$reset"
                 sleep $DELAY
@@ -1066,28 +1105,28 @@ _instalar_apenas_portainer() {
     preencha_as_info
 
     while true; do
-        echo -e "$amarelo Passo 1/5$reset"
+        echo -e "$amarelo Passo 1/4$reset"
         echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
         echo ""
 
-        echo -e "$amarelo Passo 2/5$reset"
-        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        user_portainer="admin"
+        echo -e "$amarelo Usuário do Portainer:$branco admin$reset"
         echo ""
 
         while true; do
-            echo -e "$amarelo Passo 3/5$reset"
+            echo -e "$amarelo Passo 2/4$reset"
             echo -e "$bege --> Mínimo 12 caracteres$reset"
             echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
             echo ""
             validar_senha "$pass_portainer" 12 && break
         done
 
-        echo -e "$amarelo Passo 4/5$reset"
+        echo -e "$amarelo Passo 3/4$reset"
         echo -e "$bege --> Deve ser a mesma rede que o Traefik existente usa$reset"
         echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
         echo ""
 
-        echo -e "$amarelo Passo 5/5$reset"
+        echo -e "$amarelo Passo 4/4$reset"
         echo -en "$amarelo E-mail para certificado SSL: $reset" && read -r email_ssl
         echo ""
 
@@ -1119,7 +1158,7 @@ _instalar_apenas_portainer() {
     cd /root || exit 1
     mkdir -p dados_vps
 
-    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | sed 's/\$/\$\$/g')
+    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | cut -d: -f2 | sed 's/\$/\$\$/g')
 
     {
         echo "[ SERVIDOR ]"
@@ -1146,7 +1185,7 @@ _instalar_apenas_portainer() {
     preparar_docker_swarm || return
     validar_rede_interna_existente || return
     deploy_portainer || return
-    init_portainer_admin
+    init_portainer_admin || return
 
     instalado_msg
     guarde_os_dados_msg
@@ -1241,28 +1280,28 @@ ferramenta_traefik_e_portainer() {
 
     while true; do
 
-        echo -e "$amarelo Passo 1/5$reset"
+        echo -e "$amarelo Passo 1/4$reset"
         echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
         echo ""
 
-        echo -e "$amarelo Passo 2/5$reset"
-        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        user_portainer="admin"
+        echo -e "$amarelo Usuário do Portainer:$branco admin$reset"
         echo ""
 
         while true; do
-            echo -e "$amarelo Passo 3/5$reset"
+            echo -e "$amarelo Passo 2/4$reset"
             echo -e "$bege --> Mínimo 12 caracteres$reset"
             echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
             echo ""
             validar_senha "$pass_portainer" 12 && break
         done
 
-        echo -e "$amarelo Passo 4/5$reset"
+        echo -e "$amarelo Passo 3/4$reset"
         echo -e "$bege --> Sem espaços ou caracteres especiais$reset"
         echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
         echo ""
 
-        echo -e "$amarelo Passo 5/5$reset"
+        echo -e "$amarelo Passo 4/4$reset"
         echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && read -r email_ssl
         echo ""
 
@@ -1302,7 +1341,7 @@ ferramenta_traefik_e_portainer() {
     mkdir -p dados_vps
 
     ## Gera senha hash para o Portainer
-    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | sed 's/\$/\$\$/g')
+    pass_hash=$(htpasswd -nbB "$user_portainer" "$pass_portainer" | cut -d: -f2 | sed 's/\$/\$\$/g')
 
     echo -e "$amarelo• Salvando dados da VPS...$reset"
     {
@@ -1333,7 +1372,7 @@ ferramenta_traefik_e_portainer() {
     criar_rede_interna || return
     deploy_traefik || return
     deploy_portainer || return
-    init_portainer_admin
+    init_portainer_admin || return
 
     instalado_msg
     guarde_os_dados_msg
@@ -1725,6 +1764,11 @@ echo -e "$amarelo===============================================================
 echo ""
 echo ""
 read -rp "Pressione ENTER para continuar..."
+
+if [ "$modo_infra" = true ]; then
+    ferramenta_traefik_e_portainer
+    exit 0
+fi
 
 ## Loop principal
 while true; do
