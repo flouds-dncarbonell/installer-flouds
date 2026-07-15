@@ -33,13 +33,6 @@ O script irá:
 4. Inicializar o **Docker Swarm** (caso não esteja ativo)
 5. Baixar e executar o instalador principal `SetupFlouds`
 
-Para abrir diretamente a instalação de apenas Traefik e Portainer:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup -o /tmp/flouds-setup
-sudo bash /tmp/flouds-setup --infra-only
-```
-
 ---
 
 ---
