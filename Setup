@@ -6,8 +6,59 @@ verde="\e[32m"
 branco="\e[97m"
 vermelho="\e[91m"
 reset="\e[0m"
-SETUP_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup"
-INSTALLER_URL="https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupFlouds"
+SETUP_URL="${SETUP_URL:-https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup}"
+INSTALLER_URL="${INSTALLER_URL:-https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupFlouds}"
+
+falhar() {
+    echo -e "$vermelho  ✖ $*$reset" >&2
+    exit 1
+}
+
+detectar_sistema() {
+    [ -r /etc/os-release ] || falhar "Não foi possível identificar o sistema operacional."
+    # shellcheck disable=SC1091
+    . /etc/os-release
+
+    case "${ID:-}" in
+        ubuntu|debian)
+            gerenciador_pacotes="apt"
+            pacotes=(ca-certificates curl git jq apache2-utils)
+            ;;
+        rhel|centos|rocky|almalinux|fedora)
+            if command -v dnf >/dev/null 2>&1; then
+                gerenciador_pacotes="dnf"
+            else
+                gerenciador_pacotes="yum"
+            fi
+            pacotes=(ca-certificates curl git jq httpd-tools)
+            ;;
+        *)
+            falhar "Sistema ${PRETTY_NAME:-${ID:-desconhecido}} não suportado. Use Ubuntu, Debian, RHEL, Rocky, AlmaLinux, CentOS ou Fedora."
+            ;;
+    esac
+
+    echo -e "$verde  ✔ Sistema detectado: ${PRETTY_NAME:-$ID}$reset"
+}
+
+instalar_dependencias() {
+    echo -e "$amarelo[1/3]$reset Atualizando o índice de pacotes..."
+    case "$gerenciador_pacotes" in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -y >/dev/null || falhar "Falha ao atualizar o índice do apt."
+            apt-get install -y "${pacotes[@]}" >/dev/null || falhar "Falha ao instalar as dependências."
+            ;;
+        dnf)
+            dnf -y makecache >/dev/null || falhar "Falha ao atualizar o índice do dnf."
+            dnf -y install "${pacotes[@]}" >/dev/null || falhar "Falha ao instalar as dependências."
+            ;;
+        yum)
+            yum -y makecache >/dev/null || falhar "Falha ao atualizar o índice do yum."
+            yum -y install "${pacotes[@]}" >/dev/null || falhar "Falha ao instalar as dependências."
+            ;;
+    esac
+    echo -e "$verde  ✔ Dependências instaladas$reset"
+}
 
 ## Bootstrap carregado via curl; não redirecionar stdin aqui.
 
@@ -46,45 +97,33 @@ fi
 ## Garante estar em /root
 cd /root || exit 1
 
-## Atualiza o sistema
-echo -e "$amarelo[1/8]$reset Atualizando o sistema..."
-apt update -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[2/8]$reset Fazendo upgrade..."
-apt upgrade -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[3/8]$reset Instalando sudo..."
-apt install sudo -y > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[4/8]$reset Instalando apt-utils..."
-apt-get install -y apt-utils > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[5/8]$reset Instalando jq..."
-apt-get install -y jq > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[6/8]$reset Instalando git e curl..."
-apt install -y git curl > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
-
-echo -e "$amarelo[7/8]$reset Instalando apache2-utils..."
-apt install -y apache2-utils > /dev/null 2>&1 && echo -e "$verde  ✔ OK$reset" || echo -e "$vermelho  ✖ Falhou$reset"
+detectar_sistema
+instalar_dependencias
 
 ## Instala Docker se não existir
-echo -e "$amarelo[8/8]$reset Verificando Docker..."
+echo -e "$amarelo[2/3]$reset Verificando Docker..."
 if ! command -v docker &> /dev/null; then
     echo -e "       Instalando Docker..."
-    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1
+    curl -fsSL https://get.docker.com | sh > /dev/null 2>&1 || falhar "Falha ao instalar Docker."
     echo -e "$verde  ✔ Docker instalado$reset"
 else
     echo -e "$verde  ✔ Docker já instalado$reset"
 fi
 
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now docker >/dev/null 2>&1 || falhar "Falha ao iniciar o serviço Docker."
+fi
+docker version >/dev/null 2>&1 || falhar "Docker foi instalado, mas o daemon não está respondendo."
+
 echo ""
 
 ## Verifica/inicia Swarm
+echo -e "$amarelo[3/3]$reset Verificando Docker Swarm..."
 SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
 if [ "$SWARM_STATUS" != "active" ]; then
     echo -e "$amarelo Iniciando Docker Swarm...$reset"
-    docker swarm init > /dev/null 2>&1 && echo -e "$verde  ✔ Swarm iniciado$reset" || echo -e "$vermelho  ✖ Falha ao iniciar Swarm$reset"
+    docker swarm init > /dev/null 2>&1 || falhar "Falha ao iniciar Docker Swarm."
+    echo -e "$verde  ✔ Swarm iniciado$reset"
 else
     echo -e "$verde  ✔ Docker Swarm já está ativo$reset"
 fi
@@ -94,15 +133,14 @@ echo -e "$verde Ambiente pronto! Iniciando o instalador Flouds...$reset"
 echo ""
 sleep 2
 
-## Remove versão anterior do instalador se existir
-[ -e "SetupFlouds" ] && rm SetupFlouds
-
-## Baixa e executa o instalador principal
-curl -fsSL "$INSTALLER_URL" -o SetupFlouds
-if [ $? -eq 0 ]; then
-    chmod +x SetupFlouds
-    ./SetupFlouds
+## Baixa de forma atômica para não deixar um instalador parcial em caso de falha
+tmp_installer=$(mktemp)
+if curl -fsSL "$INSTALLER_URL" -o "$tmp_installer"; then
+    chmod +x "$tmp_installer"
+    mv -f "$tmp_installer" SetupFlouds
+    ./SetupFlouds "$@"
 else
+    rm -f "$tmp_installer"
     echo -e "$vermelho Erro ao baixar o instalador. Verifique sua conexão.$reset"
     exit 1
 fi

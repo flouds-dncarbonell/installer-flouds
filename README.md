@@ -6,7 +6,7 @@ Instalador automatizado do **Fzap** — plataforma de automação WhatsApp desen
 
 ## Pré-requisitos
 
-- Servidor com **Ubuntu 20.04+** (ou Debian compatível)
+- Servidor com **Ubuntu 20.04+**, Debian, RHEL, Rocky Linux, AlmaLinux, CentOS ou Fedora
 - Acesso **root**
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
@@ -27,11 +27,18 @@ curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds
 
 O script irá:
 
-1. Atualizar o sistema (`apt update` / `apt upgrade`)
-2. Instalar dependências: `sudo`, `jq`, `git`, `curl`, `apache2-utils`
+1. Detectar a distribuição e atualizar o índice de pacotes (`apt`, `dnf` ou `yum`)
+2. Instalar as dependências necessárias
 3. Instalar o **Docker** (caso não esteja presente)
 4. Inicializar o **Docker Swarm** (caso não esteja ativo)
 5. Baixar e executar o instalador principal `SetupFlouds`
+
+Para abrir diretamente a instalação de apenas Traefik e Portainer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup -o /tmp/flouds-setup
+sudo bash /tmp/flouds-setup --infra-only
+```
 
 ---
 
