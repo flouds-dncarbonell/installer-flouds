@@ -1,0 +1,89 @@
+name: FZAP
+description:
+  Plataforma de automação WhatsApp da Flouds com integração Chatwoot, webhooks,
+  WhatsApp Cloud API, armazenamento S3, transcrição e RabbitMQ.
+instructions: |
+  Após o deploy, abra o domínio do serviço FZAP e conecte seu WhatsApp.
+  O token administrativo é gerado automaticamente e pode ser consultado na
+  variável ADMIN_TOKEN do serviço.
+changeLog:
+  - date: 2026-07-29
+    description: Primeiro template do FZAP para Easypanel
+links:
+  - label: Website
+    url: https://flouds.com.br
+  - label: Docker
+    url: https://hub.docker.com/r/dncarbonell/fzap
+contributors:
+  - name: Flouds
+    url: https://flouds.com.br
+schema:
+  type: object
+  required:
+    - appServiceName
+    - appServiceImage
+    - databaseServiceImage
+    - language
+    - sessionDeviceName
+  properties:
+    appServiceName:
+      type: string
+      title: Nome do serviço
+      default: fzap
+    appServiceImage:
+      type: string
+      title: Imagem do FZAP
+      default: dncarbonell/fzap:latest
+    databaseServiceImage:
+      type: string
+      title: Imagem do PostgreSQL
+      default: pgvector/pgvector:pg17
+    language:
+      type: string
+      title: Idioma
+      oneOf:
+        - enum:
+            - pt-BR
+          title: Português do Brasil
+        - enum:
+            - en-US
+          title: English
+        - enum:
+            - es-LATAM
+          title: Español
+      default: pt-BR
+    sessionDeviceName:
+      type: string
+      title: Nome exibido no dispositivo
+      default: Fzap
+    licenceKey:
+      type: string
+      title: Chave de licença
+      format: password
+      default: ""
+    lifetimeLicenceKey:
+      type: string
+      title: Chave de licença vitalícia
+      format: password
+      default: ""
+    chatwootIdentifier:
+      type: string
+      title: Identificador do Chatwoot
+      default: ""
+    chatwootSystemName:
+      type: string
+      title: Nome do sistema no Chatwoot
+      default: ""
+    chatwootPlatformName:
+      type: string
+      title: Nome da plataforma Chatwoot
+      default: Chatwoot
+    chatwootServiceUrl:
+      type: string
+      title: URL do Chatwoot
+      default: ""
+tags:
+  - WhatsApp
+  - Automation
+  - Chatwoot
+  - Messaging
