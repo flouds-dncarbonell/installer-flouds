@@ -1,0 +1,124 @@
+# documentation: https://github.com/flouds-dncarbonell/installer-flouds
+# slogan: Plataforma de automacao WhatsApp da Flouds
+# category: communication
+# tags: whatsapp,automation,chatwoot
+# port: 8080
+
+services:
+  fzap:
+    image: dncarbonell/fzap:latest
+    pull_policy: always
+    environment:
+      # --- URL, sistema e interface ---
+      - SERVICE_URL_FZAP_8080
+      - PUBLIC_BASE_URL=${SERVICE_URL_FZAP}
+      - TZ=${TZ:-America/Sao_Paulo}
+      - FZAP_LANGUAGE=${FZAP_LANGUAGE:-pt-BR}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - LOG_CALLER=${LOG_CALLER:-false}
+      - GLOBAL_PROXY_URL=${GLOBAL_PROXY_URL:-}
+      - PASSKEY_EXTENSION_URL=${PASSKEY_EXTENSION_URL:-}
+
+      # --- Integração com Chatwoot ---
+      - CHATWOOT_SYSTEM_IDENTIFIER=${CHATWOOT_SYSTEM_IDENTIFIER:-}
+      - CHATWOOT_SYSTEM_NAME=${CHATWOOT_SYSTEM_NAME:-}
+      - CHATWOOT_PLATFORM_NAME=${CHATWOOT_PLATFORM_NAME:-Chatwoot}
+      - CHATWOOT_SERVICE_URL=${CHATWOOT_SERVICE_URL:-}
+      - CHATWOOT_GLOBAL_DB_HOST=${CHATWOOT_GLOBAL_DB_HOST:-}
+      - CHATWOOT_GLOBAL_DB_PORT=${CHATWOOT_GLOBAL_DB_PORT:-5432}
+      - CHATWOOT_GLOBAL_DB_NAME=${CHATWOOT_GLOBAL_DB_NAME:-}
+      - CHATWOOT_GLOBAL_DB_USER=${CHATWOOT_GLOBAL_DB_USER:-}
+      - CHATWOOT_GLOBAL_DB_PASS=${CHATWOOT_GLOBAL_DB_PASS:-}
+
+      # --- Autenticação e licença ---
+      - ADMIN_TOKEN=${SERVICE_PASSWORD_FZAP}
+      - FLOUDS_LICENCE_KEY=${FLOUDS_LICENCE_KEY:-}
+      - FLOUDS_LIFETIME_LICENCE_KEY=${FLOUDS_LIFETIME_LICENCE_KEY:-}
+
+      # --- Banco principal ---
+      - DB_DRIVER=postgres
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-fzap}
+      - DB_USER=${POSTGRES_USER:-postgres}
+      - DB_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+
+      # --- WhatsApp, webhooks e mídia ---
+      - SESSION_DEVICE_NAME=${SESSION_DEVICE_NAME:-Fzap}
+      - WEBHOOK_FORMAT=json
+      - IMAGE_QUALITY_HD=${IMAGE_QUALITY_HD:-false}
+      - MAX_FILE_SIZE_MB=${MAX_FILE_SIZE_MB:-40}
+      - DOWNLOAD_TIMEOUT_SECONDS=${DOWNLOAD_TIMEOUT_SECONDS:-120}
+      - MESSAGE_DELIVERY_TIMEOUT_SECONDS=${MESSAGE_DELIVERY_TIMEOUT_SECONDS:-30}
+
+      # --- Armazenamento S3 global ---
+      - GLOBAL_S3_BUCKET=${GLOBAL_S3_BUCKET:-}
+      - GLOBAL_S3_ACCESS_KEY=${GLOBAL_S3_ACCESS_KEY:-}
+      - GLOBAL_S3_SECRET_KEY=${GLOBAL_S3_SECRET_KEY:-}
+      - GLOBAL_S3_ENDPOINT=${GLOBAL_S3_ENDPOINT:-}
+      - GLOBAL_S3_REGION=${GLOBAL_S3_REGION:-}
+      - GLOBAL_S3_PATH_STYLE=${GLOBAL_S3_PATH_STYLE:-}
+      - GLOBAL_S3_PUBLIC_URL=${GLOBAL_S3_PUBLIC_URL:-}
+      - GLOBAL_S3_MEDIA_DELIVERY=${GLOBAL_S3_MEDIA_DELIVERY:-both}
+      - GLOBAL_S3_RETENTION_DAYS=${GLOBAL_S3_RETENTION_DAYS:-}
+
+      # --- Transcrição de áudio ---
+      - TRANSCRIPTION_ENABLED=${TRANSCRIPTION_ENABLED:-false}
+      - TRANSCRIPTION_PROVIDER=${TRANSCRIPTION_PROVIDER:-openai}
+      - TRANSCRIPTION_API_KEY=${TRANSCRIPTION_API_KEY:-}
+      - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-}
+      - TRANSCRIPTION_BASE_URL=${TRANSCRIPTION_BASE_URL:-}
+
+      # --- WhatsApp Cloud API (Meta Embedded Signup) ---
+      - META_APP_ID=${META_APP_ID:-}
+      - META_APP_SECRET=${META_APP_SECRET:-}
+      - META_CONFIG_ID=${META_CONFIG_ID:-}
+
+      # --- RabbitMQ ---
+      - RABBITMQ_ENABLED=${RABBITMQ_ENABLED:-false}
+      - RABBITMQ_URL=${RABBITMQ_URL:-}
+      - RABBITMQ_EXCHANGE=${RABBITMQ_EXCHANGE:-fzap_events}
+      - RABBITMQ_PREFIX=${RABBITMQ_PREFIX:-fzap}
+      - RABBITMQ_FRAME_MAX=${RABBITMQ_FRAME_MAX:-131072}
+      - RABBITMQ_HEARTBEAT=${RABBITMQ_HEARTBEAT:-30}
+      - RABBITMQ_MAX_RECONNECT=${RABBITMQ_MAX_RECONNECT:-10}
+      - RABBITMQ_RECONNECT_DELAY=${RABBITMQ_RECONNECT_DELAY:-5}
+      - RABBITMQ_MAX_DELIVERY_ATTEMPTS=${RABBITMQ_MAX_DELIVERY_ATTEMPTS:-5}
+      - RABBITMQ_DLQ_TTL_HOURS=${RABBITMQ_DLQ_TTL_HOURS:-168}
+      - RABBITMQ_DLQ_MAX_LENGTH=${RABBITMQ_DLQ_MAX_LENGTH:-10000}
+
+      # --- Monitoramento de erros ---
+      - SENTRY_DSN=${SENTRY_DSN:-}
+    volumes:
+      - fzap_app_dbdata:/app/dbdata
+      - fzap_files:/app/files
+      - fzap_logos:/app/data/public-folder-logos
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      - POSTGRES_PASSWORD=${SERVICE_PASSWORD_POSTGRES}
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_DB=${POSTGRES_DB:-fzap}
+      - TZ=${TZ:-America/Sao_Paulo}
+    volumes:
+      - fzap_dbdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  fzap_dbdata:
+  fzap_app_dbdata:
+  fzap_files:
+  fzap_logos:
