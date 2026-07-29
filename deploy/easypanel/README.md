@@ -1,6 +1,7 @@
-# Teste do FZAP no Easypanel
+# Instalar o FZAP no Easypanel
 
-O template cria:
+Você não precisa criar banco, volumes ou variáveis manualmente. O instalador
+gera um template pronto que cria:
 
 - um serviço PostgreSQL 17 com pgvector;
 - um serviço FZAP publicado na porta interna `8080`;
@@ -8,30 +9,90 @@ O template cria:
 - três volumes persistentes da aplicação;
 - todas as variáveis opcionais da stack.
 
-## Gerar o JSON de teste
+## Antes de começar
 
-Execute localmente:
+- Tenha o Easypanel funcionando em uma VPS.
+- Aponte o domínio do FZAP para o IP dessa VPS.
+- Acesse a VPS por SSH.
+
+## 1. Gere o template
+
+Execute este único comando na VPS:
 
 ```bash
-node deploy/easypanel/generate-template.mjs > /tmp/fzap-easypanel.json
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupEasypanel | bash
 ```
 
-O JSON contém credenciais geradas no momento da execução. Não o versione.
+Ao terminar, você verá a mensagem `Template criado com sucesso`. O arquivo
+ficará em `/tmp/fzap-easypanel.json`.
 
-## Importar
+## 2. Copie o JSON
 
-1. No Easypanel, abra **Templates**.
-2. Escolha a opção para criar/importar um template a partir de JSON.
-3. Cole o conteúdo de `/tmp/fzap-easypanel.json`.
-4. Escolha o nome do projeto e crie os serviços.
-5. No serviço `fzap`, substitua o domínio gerado pelo domínio definitivo.
-6. Confirme que o proxy usa a porta `8080`.
+No terminal, execute:
+
+```bash
+cat /tmp/fzap-easypanel.json
+```
+
+Copie desde a primeira `{` até a última `}`.
+
+## 3. Importe no Easypanel
+
+1. Abra **Templates** no Easypanel.
+2. Clique em **Import JSON**, **Create from JSON** ou **Custom Template**.
+3. Cole o JSON copiado.
+4. Informe um nome para o projeto, por exemplo `fzap`.
+5. Clique em **Create**.
+
+O painel criará dois serviços:
+
+| Serviço | Função |
+|---|---|
+| `fzap` | Aplicação e painel do FZAP |
+| `fzap-db` | PostgreSQL com pgvector |
+
+## 4. Configure o domínio
+
+1. Abra o serviço `fzap`.
+2. Entre em **Domains & Proxy**.
+3. Adicione o domínio do FZAP.
+4. Marque esse domínio como principal.
+5. Confirme que **Proxy Port** está como `8080`.
+6. Salve e faça o deploy.
 
 O `PUBLIC_BASE_URL` usa `https://$(PRIMARY_DOMAIN)` e acompanha o domínio
 marcado como principal no Easypanel.
 
-O token administrativo pode ser consultado na variável `ADMIN_TOKEN` do
-serviço FZAP.
+## 5. Acesse o FZAP
+
+Quando os dois serviços estiverem ativos, abra o domínio configurado. O token
+administrativo está em:
+
+**Serviço `fzap` → Environment → `ADMIN_TOKEN`**
+
+## Segurança
+
+O JSON contém a senha do banco e o token administrativo. Depois que a
+importação funcionar, apague-o:
+
+```bash
+rm -f /tmp/fzap-easypanel.json
+```
+
+Não envie esse arquivo por e-mail, mensagem ou commit no Git.
+
+## Configurações opcionais
+
+Chatwoot, S3, transcrição, Meta Embedded Signup, RabbitMQ, Sentry e demais
+opções ficam disponíveis em **Serviço `fzap` → Environment**.
+
+## Instalação manual para desenvolvedores
+
+Quem já clonou este repositório também pode gerar o JSON diretamente:
+
+```bash
+node deploy/easypanel/generate-template.mjs > /tmp/fzap-easypanel.json
+```
 
 ## Fonte do template oficial
 
