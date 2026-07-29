@@ -67,23 +67,25 @@ senha do PostgreSQL e token administrativo. Consulte o
 
 ### Easypanel
 
-Clone o repositório e gere um template com credenciais exclusivas:
+Na VPS onde o Easypanel está instalado, execute:
 
 ```bash
-node deploy/easypanel/generate-template.mjs > /tmp/fzap-easypanel.json
+curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/SetupEasypanel | bash
 ```
 
-Depois:
+O comando cria `/tmp/fzap-easypanel.json` com senha do banco e token
+administrativo exclusivos. Para instalar:
 
-1. Abra o importador de templates JSON do Easypanel.
-2. Cole o conteúdo de `/tmp/fzap-easypanel.json`.
-3. Crie o projeto.
-4. No serviço `fzap`, configure o domínio principal e confirme a porta de proxy
-   `8080`.
+1. Execute `cat /tmp/fzap-easypanel.json` e copie todo o conteúdo.
+2. No Easypanel, abra **Templates** e escolha **Import JSON** ou
+   **Create from JSON**.
+3. Cole o conteúdo, defina o nome do projeto e clique em **Create**.
+4. Abra o serviço `fzap`, adicione seu domínio e marque-o como principal.
+5. Confirme que a porta de proxy é `8080` e faça o deploy.
 
 O template cria o FZAP, PostgreSQL 17 com pgvector, volumes persistentes, senha
-do banco e `ADMIN_TOKEN`. O JSON gerado contém credenciais e não deve ser
-versionado ou compartilhado. Consulte o
+do banco e `ADMIN_TOKEN` automaticamente. O JSON gerado contém credenciais e
+deve ser apagado depois da importação. Consulte o
 [`guia completo do Easypanel`](./deploy/easypanel/README.md).
 
 ---
