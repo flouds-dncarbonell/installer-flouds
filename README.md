@@ -1,6 +1,6 @@
 # Installer Fzap
 
-Instalador automatizado do **Fzap** — plataforma de automação WhatsApp desenvolvida pela [Flouds](https://flouds.com.br). O script prepara o ambiente, instala o Docker, inicializa o Docker Swarm e sobe a stack completa do Fzap no seu servidor.
+Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desenvolvida pela [Flouds](https://flouds.com.br). O script prepara o servidor e instala tudo o que o FZAP precisa para funcionar com HTTPS.
 
 ---
 
@@ -10,14 +10,27 @@ Instalador automatizado do **Fzap** — plataforma de automação WhatsApp desen
 - Acesso **root**
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
-- Um **domínio** apontando para o IP do servidor
-- **Traefik** já em execução na rede `FloudsNet` (com o resolver `letsencryptresolver`)
+- Dois endereços apontando para o IP do servidor: um para o **FZAP** e outro para o **painel técnico**
 
-> Caso precise instalar o Traefik e criar a rede, use o SetupFlouds como ponto de partida.
+Na primeira instalação, o próprio instalador configura:
+
+- **Traefik**, responsável pelo acesso HTTPS e pelos certificados
+- **Portainer**, painel técnico usado para instalar e administrar o FZAP
+- A rede Docker compartilhada `proxy`
+
+O usuário não precisa configurar esses componentes manualmente.
 
 ---
 
-## Como instalar
+## Formas de instalação
+
+| Ambiente | Método |
+|---|---|
+| VPS sem painel | Instalador automático via terminal |
+| Coolify | Stack Docker Compose pronta |
+| Easypanel | Template JSON one-click |
+
+### VPS sem painel
 
 Execute o comando abaixo no terminal do servidor como **root**:
 
@@ -31,9 +44,47 @@ O script irá:
 2. Instalar as dependências necessárias
 3. Instalar o **Docker** (caso não esteja presente)
 4. Inicializar o **Docker Swarm** (caso não esteja ativo)
-5. Baixar e executar o instalador principal `SetupFlouds`
+5. Preparar automaticamente o acesso HTTPS e o painel técnico
+6. Instalar o banco de dados e o FZAP
+7. Verificar se os serviços ficaram online
 
----
+No menu, escolha **Instalar FZAP neste servidor**. As configurações de
+infraestrutura ficam disponíveis separadamente em **Configurações avançadas**.
+
+### Coolify
+
+1. Crie um recurso **Docker Compose Empty**.
+2. Cole o conteúdo de
+   [`deploy/coolify/docker-compose.yml`](./deploy/coolify/docker-compose.yml).
+3. No serviço `fzap`, configure o domínio com a porta interna `8080`, por
+   exemplo: `https://fzap.seudominio.com:8080`.
+4. Preencha a licença e as configurações opcionais desejadas.
+5. Salve e faça o deploy.
+
+O Coolify administra o domínio, certificado HTTPS, rede interna, volumes,
+senha do PostgreSQL e token administrativo. Consulte o
+[`guia completo do Coolify`](./deploy/coolify/README.md).
+
+### Easypanel
+
+Clone o repositório e gere um template com credenciais exclusivas:
+
+```bash
+node deploy/easypanel/generate-template.mjs > /tmp/fzap-easypanel.json
+```
+
+Depois:
+
+1. Abra o importador de templates JSON do Easypanel.
+2. Cole o conteúdo de `/tmp/fzap-easypanel.json`.
+3. Crie o projeto.
+4. No serviço `fzap`, configure o domínio principal e confirme a porta de proxy
+   `8080`.
+
+O template cria o FZAP, PostgreSQL 17 com pgvector, volumes persistentes, senha
+do banco e `ADMIN_TOKEN`. O JSON gerado contém credenciais e não deve ser
+versionado ou compartilhado. Consulte o
+[`guia completo do Easypanel`](./deploy/easypanel/README.md).
 
 ---
 
@@ -64,6 +115,12 @@ A stack do Fzap usa Docker Swarm com Traefik para SSL automático. As principais
 | `DB_HOST` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Conexão PostgreSQL |
 | `SESSION_DEVICE_NAME` | Nome exibido no celular ao conectar |
 
+Também estão disponíveis configurações opcionais para proxy global, armazenamento
+S3 compartilhado, banco global do Chatwoot, transcrição de áudio, limites e
+timeouts de mídia, extensão Passkey e filas de falha (DLQ) do RabbitMQ. O
+instalador deixa essas opções comentadas na stack gerada para configuração pelo
+Portainer quando necessário.
+
 O arquivo de referência da stack completa está em [`stack-fzap.md`](./stack-fzap.md).
 
 ---
@@ -72,7 +129,8 @@ O arquivo de referência da stack completa está em [`stack-fzap.md`](./stack-fz
 
 | Volume | Uso |
 |---|---|
-| `fzap_dbdata` | Banco de dados SQLite interno |
+| `fzap_dbdata` | Dados persistentes do PostgreSQL 17 (pgvector) |
+| `fzap_app_dbdata` | Dados locais persistentes da aplicação |
 | `fzap_files` | Arquivos de mídia |
 | `fzap_logos` | Logos e assets públicos |
 
