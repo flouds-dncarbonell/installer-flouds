@@ -5,11 +5,13 @@
 ##     Estrutura inspirada no SetupOrion: https://github.com/oriondesign2015/SetupOrion
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-versao="1.0.0"
+versao="1.3.0"
 traefik_image="traefik:v3.6.17"
 portainer_image="portainer/portainer-ce:2.39.5"
 portainer_agent_image="portainer/agent:2.39.5"
+rede_padrao="proxy"
 modo_infra=false
+modo_verbose=false
 
 ## Dados de acesso, hashes e arquivos ACME criados pelo instalador ficam restritos ao root.
 umask 077
@@ -17,9 +19,11 @@ umask 077
 for argumento in "$@"; do
     case "$argumento" in
         --infra-only) modo_infra=true ;;
+        --verbose) modo_verbose=true ;;
         -h|--help)
-            echo "Uso: $0 [--infra-only]"
+            echo "Uso: $0 [--infra-only] [--verbose]"
             echo "  --infra-only  instala somente Traefik e Portainer"
+            echo "  --verbose     mostra os detalhes técnicos durante a instalação"
             exit 0
             ;;
         *)
@@ -29,13 +33,23 @@ for argumento in "$@"; do
     esac
 done
 
-## Cores
-amarelo="\e[33m"
-verde="\e[32m"
-branco="\e[97m"
-bege="\e[93m"
-vermelho="\e[91m"
-reset="\e[0m"
+## Cores. NO_COLOR=1 desativa os códigos ANSI sem alterar o texto das mensagens:
+## todo estado também é indicado por marcador (✔ ● ⚠ ✖) e por palavra.
+if [ -n "${NO_COLOR:-}" ]; then
+    amarelo=""
+    verde=""
+    branco=""
+    bege=""
+    vermelho=""
+    reset=""
+else
+    amarelo="\e[33m"
+    verde="\e[32m"
+    branco="\e[97m"
+    bege="\e[93m"
+    vermelho="\e[91m"
+    reset="\e[0m"
+fi
 
 ## Garante leitura interativa quando o script for executado a partir de um bootstrap via pipe
 if [ ! -t 0 ] && [ -r /dev/tty ] && [ -f "$0" ]; then
@@ -46,6 +60,8 @@ fi
 home_directory="$HOME"
 dados_vps="${home_directory}/dados_vps/dados_vps"
 dados_portainer_file="${home_directory}/dados_vps/dados_portainer"
+estado_file="${home_directory}/dados_vps/estado_instalacao"
+log_file="${home_directory}/dados_vps/instalacao.log"
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 ## ASCII ART
@@ -65,29 +81,6 @@ nome_instalador() {
     echo ""
 }
 
-nome_menu() {
-    clear
-    echo -e "$amarelo====================================================================================================$reset"
-    echo ""
-    echo -e "$branco              ███╗   ███╗███████╗███╗   ██╗██╗   ██╗    ██████╗ ███████╗$reset"
-    echo -e "$branco              ████╗ ████║██╔════╝████╗  ██║██║   ██║    ██╔══██╗██╔════╝$reset"
-    echo -e "$branco              ██╔████╔██║█████╗  ██╔██╗ ██║██║   ██║    ██║  ██║█████╗  $reset"
-    echo -e "$branco              ██║╚██╔╝██║██╔══╝  ██║╚██╗██║██║   ██║    ██║  ██║██╔══╝  $reset"
-    echo -e "$branco              ██║ ╚═╝ ██║███████╗██║ ╚████║╚██████╔╝    ██████╔╝███████╗$reset"
-    echo -e "$branco              ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝ ╚═════╝     ╚═════╝ ╚══════╝$reset"
-    echo ""
-    echo -e "$branco         ███████╗███████╗██████╗ ██████╗  █████╗ ███╗   ███╗███████╗███╗   ██╗████████╗ █████╗ ███████╗$reset"
-    echo -e "$branco         ██╔════╝██╔════╝██╔══██╗██╔══██╗██╔══██╗████╗ ████║██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔════╝$reset"
-    echo -e "$branco         █████╗  █████╗  ██████╔╝██████╔╝███████║██╔████╔██║█████╗  ██╔██╗ ██║   ██║   ███████║███████╗$reset"
-    echo -e "$branco         ██╔══╝  ██╔══╝  ██╔══██╗██╔══██╗██╔══██║██║╚██╔╝██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██║╚════██║$reset"
-    echo -e "$branco         ██║     ███████╗██║  ██║██║  ██║██║  ██║██║ ╚═╝ ██║███████╗██║ ╚████║   ██║   ██║  ██║███████║$reset"
-    echo -e "$branco         ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚══════╝$reset"
-    echo ""
-    echo -e "$amarelo====================================================================================================$reset"
-    echo -e "$amarelo                         Flouds Installer v$versao$reset"
-    echo ""
-}
-
 nome_traefik_portainer() {
     clear
     echo ""
@@ -104,19 +97,6 @@ nome_traefik_portainer() {
     echo -e "$branco      ██╔═══╝ ██║   ██║██╔══██╗   ██║   ██╔══██║██║██║╚██╗██║██╔══╝  ██╔══██╗$reset"
     echo -e "$branco      ██║     ╚██████╔╝██║  ██║   ██║   ██║  ██║██║██║ ╚████║███████╗██║  ██║$reset"
     echo -e "$branco      ╚═╝      ╚═════╝ ╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝╚══════╝╚═╝  ╚═╝$reset"
-    echo ""
-    echo ""
-}
-
-nome_fzap() {
-    clear
-    echo ""
-    echo -e "$branco         ███████╗███████╗ █████╗ ██████╗ $reset"
-    echo -e "$branco         ██╔════╝╚══███╔╝██╔══██╗██╔══██╗$reset"
-    echo -e "$branco         █████╗    ███╔╝ ███████║██████╔╝$reset"
-    echo -e "$branco         ██╔══╝   ███╔╝  ██╔══██║██╔═══╝ $reset"
-    echo -e "$branco         ██║     ███████╗██║  ██║██║     $reset"
-    echo -e "$branco         ╚═╝     ╚══════╝╚═╝  ╚═╝╚═╝     $reset"
     echo ""
     echo ""
 }
@@ -211,6 +191,183 @@ guarde_os_dados_msg() {
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## LOG TÉCNICO
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Registra uma linha no log técnico. Em --verbose a linha também vai para a
+## tela. Segredos nunca são passados para esta função.
+log_tecnico() {
+    local mensagem="$1"
+
+    mkdir -p "$(dirname "$log_file")" 2>/dev/null
+    printf '%s  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$mensagem" >> "$log_file" 2>/dev/null
+    chmod 600 "$log_file" 2>/dev/null
+
+    if [ "$modo_verbose" = true ]; then
+        echo -e "$bege    · $mensagem$reset"
+    fi
+}
+
+## Mantém no máximo 5 execuções no histórico. A rotação é por execução e não
+## por dia: o que interessa para o suporte é o log da instalação que falhou.
+rotacionar_log() {
+    local i
+
+    [ -f "$log_file" ] || return 0
+
+    for i in 4 3 2 1; do
+        [ -f "${log_file}.$i" ] && mv -f "${log_file}.$i" "${log_file}.$((i + 1))" 2>/dev/null
+    done
+    mv -f "$log_file" "${log_file}.1" 2>/dev/null
+    return 0
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ESTADO E RETOMADA
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Etapas registradas no arquivo de estado, em ordem. Cada valor só é gravado
+## depois de uma verificação objetiva do resultado, nunca ao disparar o comando.
+estado_ordem="verificado_servidor dns_ok dados_confirmados infra_pronta postgres_saudavel fzap_saudavel concluido"
+
+estado_ler() {
+    local campo="$1"
+    [ -f "$estado_file" ] || return 0
+    ler_campo_arquivo "$estado_file" "${campo}: "
+}
+
+## Grava o estado de forma atômica para que uma interrupção no meio da escrita
+## não deixe um arquivo pela metade.
+estado_gravar() {
+    local etapa="$1"
+    local situacao="${2:-em_andamento}"
+    local temporario
+
+    mkdir -p "$(dirname "$estado_file")" 2>/dev/null
+    temporario=$(mktemp) || return 1
+    {
+        echo "Versao do instalador: $versao"
+        echo "Etapa concluida: $etapa"
+        echo "Situacao: $situacao"
+        echo "Dominio base: ${dominio_base:-}"
+        echo "Dominio fzap: ${url_fzap:-}"
+        echo "Dominio painel: ${url_portainer:-}"
+        echo "Email SSL: ${email_ssl:-}"
+        echo "Idioma: ${fzap_language:-}"
+        echo "Rede interna: ${nome_rede_interna:-}"
+        ## A licença e os campos do Chatwoot ficam aqui porque uma retomada
+        ## precisa reconstruir exatamente a mesma stack. Sem isso, retomar
+        ## reinstalaria o FZAP como versão gratuita.
+        echo "Licenca: ${licence_key:-}"
+        echo "Chatwoot identificador: ${chatwoot_identifier:-}"
+        echo "Chatwoot nome: ${chatwoot_system_name:-}"
+        echo "Chatwoot plataforma: ${chatwoot_platform_name:-}"
+        echo "Chatwoot url: ${chatwoot_service_url:-}"
+        echo "Ultima verificacao: $(date '+%Y-%m-%d %H:%M:%S')"
+    } > "$temporario" || {
+        rm -f "$temporario"
+        return 1
+    }
+    chmod 600 "$temporario"
+    mv -f "$temporario" "$estado_file"
+    log_tecnico "estado gravado: etapa=$etapa situacao=$situacao"
+}
+
+estado_limpar() {
+    rm -f "$estado_file" 2>/dev/null
+    return 0
+}
+
+## Verdadeiro quando a etapa informada já foi concluída em uma execução anterior.
+estado_alcancou() {
+    local alvo="$1"
+    local concluida
+    local etapa
+
+    concluida=$(estado_ler "Etapa concluida")
+    [ -n "$concluida" ] || return 1
+
+    ## Percorre a ordem das etapas: se o alvo aparece antes da etapa concluída
+    ## (ou é ela mesma), então o alvo já ficou para trás.
+    for etapa in $estado_ordem; do
+        [ "$etapa" = "$alvo" ] && return 0
+        [ "$etapa" = "$concluida" ] && return 1
+    done
+    return 1
+}
+
+## Recarrega no ambiente os dados já confirmados em uma execução anterior.
+estado_restaurar_dados() {
+    dominio_base=$(estado_ler "Dominio base")
+    url_fzap=$(estado_ler "Dominio fzap")
+    url_portainer=$(estado_ler "Dominio painel")
+    email_ssl=$(estado_ler "Email SSL")
+    fzap_language=$(estado_ler "Idioma")
+    nome_rede_interna=$(estado_ler "Rede interna")
+    licence_key=$(estado_ler "Licenca")
+    chatwoot_identifier=$(estado_ler "Chatwoot identificador")
+    chatwoot_system_name=$(estado_ler "Chatwoot nome")
+    chatwoot_platform_name=$(estado_ler "Chatwoot plataforma")
+    chatwoot_service_url=$(estado_ler "Chatwoot url")
+    [ -n "$nome_rede_interna" ] || nome_rede_interna="$rede_padrao"
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## APRESENTAÇÃO DAS ETAPAS
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Largura de referência das telas: 72 colunas.
+linha_fina() {
+    echo -e "$amarelo------------------------------------------------------------------------$reset"
+}
+
+## Cabeçalho curto e estável. Substitui os blocos de ASCII art no meio do
+## fluxo: eles ficam apenas na abertura e na conclusão.
+titulo_etapa() {
+    local numero="$1"
+    local titulo="$2"
+
+    clear
+    echo ""
+    echo -e "$branco Instalação do FZAP$reset$bege   —   etapa $numero de 5$reset"
+    echo -e "$amarelo $titulo$reset"
+    linha_fina
+    echo ""
+}
+
+## Linhas de estado com marcador textual, para que o significado não dependa
+## da cor.
+item_ok() {
+    echo -e "$verde ✔$reset $1"
+}
+
+item_pendente() {
+    echo -e "$amarelo ●$reset $1"
+}
+
+item_atencao() {
+    echo -e "$bege ⚠$reset $1"
+}
+
+item_falha() {
+    echo -e "$vermelho ✖$reset $1"
+}
+
+## Alinha rótulo e valor em colunas. Usa ${#texto}, que conta caracteres, e não
+## printf %-Ns, que conta bytes e desalinharia rótulos acentuados.
+rotulo_valor() {
+    local rotulo="$1"
+    local valor="$2"
+    local largura=24
+    local faltam
+    local espacos=""
+
+    faltam=$((largura - ${#rotulo}))
+    [ "$faltam" -gt 0 ] && espacos=$(printf '%*s' "$faltam" '')
+    echo "${rotulo}${espacos}${valor}"
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 ## FUNÇÕES UTILITÁRIAS
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
@@ -248,24 +405,169 @@ validar_senha() {
         echo -e "$vermelho  Senha muito curta. Mínimo $min caracteres.$reset"
         return 1
     fi
+    if [ ${#senha} -gt 128 ]; then
+        echo -e "$vermelho  Senha muito longa. Máximo 128 caracteres.$reset"
+        return 1
+    fi
+    if [[ "$senha" == *[[:cntrl:]]* ]]; then
+        echo -e "$vermelho  A senha não pode conter caracteres de controle.$reset"
+        return 1
+    fi
     return 0
 }
 
-## Verifica se stack já existe no Swarm
-verificar_stack() {
-    local nome_stack="$1"
-    if docker stack ls --format "{{.Name}}" 2>/dev/null | grep -q "^${nome_stack}$"; then
-        clear
-        erro_msg
-        echo ""
-        echo -e " A stack $amarelo${nome_stack}$reset já está instalada."
-        echo -e " Para reinstalar, remova a stack no Portainer e tente novamente."
-        echo ""
-        echo -e " Voltando ao menu em 8 segundos..."
-        sleep 8
-        return 0
+## Remove espaços externos, protocolo e uma barra final. Caminhos e portas
+## permanecem no valor para que a validação os rejeite explicitamente.
+normalizar_dominio() {
+    local dominio="$1"
+    local dominio_minusculo
+
+    dominio="${dominio#"${dominio%%[![:space:]]*}"}"
+    dominio="${dominio%"${dominio##*[![:space:]]}"}"
+    dominio_minusculo="${dominio,,}"
+
+    if [[ "$dominio_minusculo" == http://* ]]; then
+        dominio="${dominio:7}"
+    elif [[ "$dominio_minusculo" == https://* ]]; then
+        dominio="${dominio:8}"
     fi
-    return 1
+
+    dominio="${dominio%/}"
+    dominio="${dominio%.}"
+    echo "${dominio,,}"
+}
+
+eh_dominio_valido() {
+    local dominio="$1"
+    local rotulo
+    local tld
+
+    [ -n "$dominio" ] && [ ${#dominio} -le 253 ] || return 1
+    [[ "$dominio" == *.* ]] || return 1
+    [[ "$dominio" != *[!A-Za-z0-9.-]* ]] || return 1
+    [[ "$dominio" != .* && "$dominio" != *. && "$dominio" != *..* ]] || return 1
+
+    IFS='.' read -ra rotulos <<< "$dominio"
+    for rotulo in "${rotulos[@]}"; do
+        [ -n "$rotulo" ] && [ ${#rotulo} -le 63 ] || return 1
+        [[ "$rotulo" =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$ ]] || return 1
+    done
+    tld="${dominio##*.}"
+    [ ${#tld} -ge 2 ] && [[ "$tld" == *[A-Za-z]* ]] || return 1
+
+    return 0
+}
+
+validar_dominio() {
+    if ! eh_dominio_valido "$1"; then
+        echo -e "$vermelho  Domínio inválido. Informe apenas o host, por exemplo: app.seudominio.com.$reset"
+        return 1
+    fi
+    return 0
+}
+
+validar_email() {
+    local email="$1"
+    local local_part dominio
+
+    [ -n "$email" ] && [ ${#email} -le 254 ] || {
+        echo -e "$vermelho  E-mail inválido.$reset"
+        return 1
+    }
+    [[ "$email" != *[[:space:]]* && "$email" == *@* && "$email" != *@*@* ]] || {
+        echo -e "$vermelho  E-mail inválido.$reset"
+        return 1
+    }
+
+    local_part="${email%@*}"
+    dominio="${email##*@}"
+    if [ -z "$local_part" ] || [ ${#local_part} -gt 64 ] \
+        || [[ "$local_part" == .* || "$local_part" == *. || "$local_part" == *..* ]] \
+        || [[ ! "$local_part" =~ ^[A-Za-z0-9.!#$%\'*+/=?^_\`{|}~-]+$ ]] \
+        || ! eh_dominio_valido "${dominio,,}"; then
+        echo -e "$vermelho  E-mail inválido.$reset"
+        return 1
+    fi
+    return 0
+}
+
+validar_rede_docker() {
+    if [[ ! "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$ ]]; then
+        echo -e "$vermelho  Nome de rede inválido. Use até 255 letras, números, ponto, hífen ou sublinhado.$reset"
+        return 1
+    fi
+    return 0
+}
+
+validar_usuario_portainer() {
+    if [ -z "$1" ] || [ ${#1} -gt 128 ] || [[ "$1" == *[[:cntrl:]]* ]]; then
+        echo -e "$vermelho  Usuário inválido. Use de 1 a 128 caracteres, sem caracteres de controle.$reset"
+        return 1
+    fi
+    return 0
+}
+
+validar_texto_livre() {
+    local valor="$1"
+    local max="${2:-200}"
+    local obrigatorio="${3:-false}"
+
+    if [ "$obrigatorio" = true ] && [ -z "$valor" ]; then
+        echo -e "$vermelho  Este campo é obrigatório.$reset"
+        return 1
+    fi
+    if [ ${#valor} -gt "$max" ] || [[ "$valor" == *[[:cntrl:]]* ]]; then
+        echo -e "$vermelho  Valor inválido. Use no máximo $max caracteres em uma única linha.$reset"
+        return 1
+    fi
+    return 0
+}
+
+validar_url_https_opcional() {
+    local url="$1"
+    local host
+
+    [ -z "$url" ] && return 0
+    [[ "$url" == https://* && "$url" != *[[:space:]]* ]] || {
+        echo -e "$vermelho  URL inválida. Use uma URL HTTPS completa.$reset"
+        return 1
+    }
+    host="${url#https://}"
+    host="${host%%/*}"
+    validar_dominio "$host"
+}
+
+## JSON também é um escalar YAML válido. Isso impede que valores livres
+## alterem a estrutura do arquivo Compose.
+yaml_quote() {
+    jq -Rn --arg valor "$1" '$valor'
+}
+
+ler_campo_arquivo() {
+    local arquivo="$1"
+    local prefixo="$2"
+    awk -v prefixo="$prefixo" \
+        'index($0, prefixo) == 1 { print substr($0, length(prefixo) + 1); exit }' \
+        "$arquivo"
+}
+
+atualizar_campo_arquivo() {
+    local arquivo="$1"
+    local prefixo="$2"
+    local valor="$3"
+    local temporario
+
+    temporario=$(mktemp)
+    awk -v prefixo="$prefixo" -v valor="$valor" '
+        index($0, prefixo) == 1 { print prefixo valor; atualizado=1; next }
+        { print }
+        END { if (!atualizado) print prefixo valor }
+    ' "$arquivo" > "$temporario" || {
+        rm -f "$temporario"
+        return 1
+    }
+    chmod 600 "$temporario"
+    mv -f "$temporario" "$arquivo"
 }
 
 ## Verifica recursos mínimos (vCPU e GB RAM)
@@ -274,13 +576,20 @@ recursos() {
     local ram_req=$2
 
     local vcpu_disp
+    local ram_kb
+    local ram_req_kb
     local ram_disp
 
     vcpu_disp=$(nproc 2>/dev/null || echo 1)
-    ram_disp=$(free -g 2>/dev/null | awk '/^Mem:/{print $2}')
-    ram_disp=${ram_disp:-1}
+    ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+    ram_kb=${ram_kb:-0}
+    ## Provedores anunciam a capacidade nominal da VPS, enquanto o Linux
+    ## desconta uma pequena parte reservada ao sistema. Aceitamos até 5% dessa
+    ## diferença para não reprovar uma VPS comercializada como 2 GB.
+    ram_req_kb=$((ram_req * 950000))
+    ram_disp=$(awk -v kb="$ram_kb" 'BEGIN { printf "%.1f", kb / 1000000 }')
 
-    if [ "$vcpu_disp" -lt "$vcpu_req" ] || [ "$ram_disp" -lt "$ram_req" ]; then
+    if [ "$vcpu_disp" -lt "$vcpu_req" ] || [ "$ram_kb" -lt "$ram_req_kb" ]; then
         clear
         erro_msg
         echo ""
@@ -297,18 +606,63 @@ recursos() {
     return 1
 }
 
-normalizar_dominio() {
-    local dominio="$1"
-    dominio="${dominio#http://}"
-    dominio="${dominio#https://}"
-    dominio="${dominio%%/*}"
-    dominio="${dominio%%:*}"
-    echo "$dominio"
-}
-
 obter_ip_publico() {
     curl -fsS4 --max-time 10 https://ifconfig.me 2>/dev/null \
         || curl -fsS4 --max-time 10 https://api.ipify.org 2>/dev/null
+}
+
+## Consulta o IP público uma única vez por execução.
+ip_publico_cache=""
+ip_publico() {
+    [ -n "$ip_publico_cache" ] && { echo "$ip_publico_cache"; return 0; }
+    ip_publico_cache=$(obter_ip_publico)
+    echo "$ip_publico_cache"
+}
+
+## Verifica o DNS de um host e devolve um resultado estruturado, sem escrever
+## nada na tela: a camada de apresentação decide a mensagem.
+##   0 = aponta para esta VPS
+##   1 = não resolve em DNS público
+##   2 = resolve, mas para outro IP (proxy tipo Cloudflare, por exemplo)
+##   3 = IP público da VPS indeterminado
+## Os IPs encontrados ficam em dns_ips_encontrados.
+dns_ips_encontrados=""
+checar_dns_host() {
+    local host="$1"
+    local ip_vps
+
+    dns_ips_encontrados=""
+    ip_vps=$(ip_publico)
+
+    dns_ips_encontrados=$(getent ahostsv4 "$host" 2>/dev/null \
+        | awk '{print $1}' | sort -u | tr '\n' ' ')
+    dns_ips_encontrados="${dns_ips_encontrados% }"
+
+    [ -z "$ip_vps" ] && return 3
+    [ -z "$dns_ips_encontrados" ] && return 1
+
+    if echo "$dns_ips_encontrados" | tr ' ' '\n' | grep -qx "$ip_vps"; then
+        return 0
+    fi
+    return 2
+}
+
+## Mostra o registro DNS que falta, no formato do painel do provedor.
+mostrar_registro_dns() {
+    local host="$1"
+    local base="$2"
+    local ip_vps
+    local nome
+
+    ip_vps=$(ip_publico)
+    nome="${host%".$base"}"
+    [ "$nome" = "$host" ] && nome="@"
+
+    echo -e "$bege   Crie este registro no painel do seu provedor de domínio:$reset"
+    echo ""
+    printf '     %-6s %-10s %s\n' "Tipo" "Nome" "Valor"
+    printf '     %-6s %-10s %s\n' "A" "$nome" "${ip_vps:-<IP desta VPS>}"
+    echo ""
 }
 
 configurar_firewall_http_https() {
@@ -351,6 +705,7 @@ validar_dominio_para_ssl() {
     local ips_dominio
 
     dominio=$(normalizar_dominio "$1")
+    validar_dominio "$dominio" || return 1
     ip_vps=$(obter_ip_publico)
     ips_dominio=$(getent ahostsv4 "$dominio" 2>/dev/null | awk '{print $1}' | sort -u | tr '\n' ' ')
 
@@ -391,11 +746,46 @@ validar_dominio_para_ssl() {
     return 0
 }
 
+## O script do Docker roda apt-get/dnf internamente; em VPS recém-criada o lock
+## do dpkg ainda pode estar com o unattended-upgrades. Espera antes de seguir.
+aguardar_lock_pacotes() {
+    local limite=${1:-600} esperado=0 avisou=0 arquivo ocupado
+
+    command -v fuser >/dev/null 2>&1 || return 0
+
+    while :; do
+        ocupado=0
+        for arquivo in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
+                       /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
+                       /var/run/yum.pid; do
+            [ -e "$arquivo" ] || continue
+            if fuser "$arquivo" >/dev/null 2>&1; then
+                ocupado=1
+                break
+            fi
+        done
+        [ "$ocupado" -eq 0 ] && break
+
+        if [ "$avisou" -eq 0 ]; then
+            echo -e "$amarelo  Aguardando o fim das atualizações automáticas do sistema...$reset"
+            avisou=1
+        fi
+
+        [ "$esperado" -ge "$limite" ] && break
+
+        sleep 5
+        esperado=$((esperado + 5))
+    done
+
+    return 0
+}
+
 instalar_docker() {
     echo -e "$amarelo• Verificando Docker...$reset"
 
     if ! command -v docker >/dev/null 2>&1; then
         echo -e "$amarelo  Docker não encontrado. Instalando Docker...$reset"
+        aguardar_lock_pacotes
         curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || {
             echo -e "$vermelho  ✖ Falha ao instalar Docker$reset"
             return 1
@@ -659,9 +1049,14 @@ init_portainer_admin() {
     echo -e "$amarelo• Inicializando conta admin do Portainer...$reset"
 
     for i in $(seq 1 $MAX_RETRIES); do
-        AUTH_RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/auth" \
+        ## A cada tentativa reavalia como alcançar o painel: na primeira volta o
+        ## serviço pode ainda não estar aceitando conexões.
+        preparar_acesso_portainer "$url_portainer" || true
+
+        AUTH_RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/auth" \
             -H "Content-Type: application/json" \
-            -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
+            --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
+                '{Username: $usuario, Password: $senha}')")
 
         if echo "$AUTH_RESPONSE" | jq -e '.jwt | strings | length > 0' >/dev/null 2>&1; then
             echo -e "$verde  ✔ Conta de administrador validada com sucesso!$reset"
@@ -676,17 +1071,20 @@ init_portainer_admin() {
             | grep -oE 'setup_token=[a-f0-9]{64}' | tail -1 | cut -d= -f2)
 
         if [ -n "$SETUP_TOKEN" ]; then
-            RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/users/admin/init" \
+            RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/users/admin/init" \
                 -H "Content-Type: application/json" \
                 -H "X-Setup-Token: $SETUP_TOKEN" \
-                -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
+                --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
+                    '{Username: $usuario, Password: $senha}')")
         else
-            RESPONSE=$(curl -k -s -X POST "https://$url_portainer/api/users/admin/init" \
+            RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/users/admin/init" \
                 -H "Content-Type: application/json" \
-                -d "{\"Username\": \"$user_portainer\", \"Password\": \"$pass_portainer\"}")
+                --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
+                    '{Username: $usuario, Password: $senha}')")
         fi
 
-        if echo "$RESPONSE" | grep -q "\"Username\":\"$user_portainer\""; then
+        if echo "$RESPONSE" | jq -e --arg usuario "$user_portainer" \
+            '.Username == $usuario' >/dev/null 2>&1; then
             echo -e "$verde  ✔ Conta de administrador criada com sucesso!$reset"
             CONTA_CRIADA=true
             break
@@ -701,9 +1099,7 @@ init_portainer_admin() {
         fi
     done
 
-    if [ "$CONTA_CRIADA" = true ]; then
-        sed -i "s|Token: .*|Token: |" "$dados_portainer_file" 2>/dev/null
-    fi
+    [ "$CONTA_CRIADA" = true ]
 }
 
 reiniciar_portainer() {
@@ -805,6 +1201,39 @@ verificar_docker_e_portainer_traefik() {
 ## PORTAINER API
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
+## O Portainer não publica portas: ele só é alcançável através do Traefik, no
+## host público. Como o Traefik roteia por SNI/Host, resolver o host para
+## 127.0.0.1 permite falar com a API mesmo antes de o DNS existir — e sem abrir
+## nenhuma porta nova. A decisão é tomada uma única vez, porque repetir a
+## tentativa dentro de um POST duplicaria o efeito da chamada.
+portainer_resolve_args=()
+
+preparar_acesso_portainer() {
+    local host="$1"
+
+    portainer_resolve_args=()
+    [ -n "$host" ] || return 1
+
+    if curl -k -fsS --max-time 15 --resolve "${host}:443:127.0.0.1" \
+        "https://${host}/api/status" >/dev/null 2>&1; then
+        portainer_resolve_args=(--resolve "${host}:443:127.0.0.1")
+        log_tecnico "painel técnico alcançado localmente (${host} -> 127.0.0.1)"
+        return 0
+    fi
+
+    if curl -k -fsS --max-time 15 "https://${host}/api/status" >/dev/null 2>&1; then
+        log_tecnico "painel técnico alcançado por DNS público (${host})"
+        return 0
+    fi
+
+    log_tecnico "painel técnico ainda não respondeu em ${host}"
+    return 1
+}
+
+portainer_api() {
+    curl -k "${portainer_resolve_args[@]}" "$@"
+}
+
 criar_arquivo_portainer() {
     [ -f "$dados_portainer_file" ] && rm "$dados_portainer_file"
 
@@ -818,125 +1247,194 @@ criar_arquivo_portainer() {
     echo ""
     echo ""
 
-    echo -e "$amarelo Passo 1/3$reset"
-    read -rp "URL do Portainer (ex: portainer.seudominio.com.br): " PORTAINER_URL
+    while true; do
+        echo -e "$amarelo Passo 1/3$reset"
+        read -rp "URL do Portainer (ex: portainer.seudominio.com.br): " PORTAINER_URL
+        PORTAINER_URL=$(normalizar_dominio "$PORTAINER_URL")
+        validar_dominio "$PORTAINER_URL" && break
+        echo ""
+    done
     echo ""
 
-    echo -e "$amarelo Passo 2/3$reset"
-    read -rp "Usuário do Portainer (ex: admin): " USUARIO
+    while true; do
+        echo -e "$amarelo Passo 2/3$reset"
+        read -rp "Usuário do Portainer (ex: admin): " USUARIO
+        validar_usuario_portainer "$USUARIO" && break
+        echo ""
+    done
     echo ""
 
-    echo -e "$amarelo Passo 3/3$reset"
-    echo -e "$branco Obs: A senha não aparecerá ao digitar$reset"
-    read -rs -p "Senha do Portainer: " SENHA
-    echo ""
+    while true; do
+        echo -e "$amarelo Passo 3/3$reset"
+        echo -e "$branco Obs: A senha não aparecerá ao digitar$reset"
+        read -rs -p "Senha do Portainer: " SENHA
+        echo ""
+        validar_senha "$SENHA" 12 && break
+        echo ""
+    done
 
-    echo -e "[ PORTAINER ]\nDominio do portainer: $PORTAINER_URL\n\nUsuario: $USUARIO\n\nSenha: $SENHA\n\nToken: " > "$dados_portainer_file"
+    {
+        echo "[ PORTAINER ]"
+        echo "Dominio do portainer: $PORTAINER_URL"
+        echo ""
+        echo "Usuario: $USUARIO"
+        echo ""
+        echo "Senha: $SENHA"
+        echo ""
+        echo "Token API: "
+    } > "$dados_portainer_file"
 }
 
-verificar_campos_portainer() {
-    local url user pass
-    url=$(grep "Dominio do portainer:" "$dados_portainer_file" | awk -F': ' '{print $2}')
-    user=$(grep "Usuario:" "$dados_portainer_file" | awk -F': ' '{print $2}')
-    pass=$(grep "Senha:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+obter_token_api_portainer() {
+    local token_salvo
+    local jwt
+    local usuario_atual
+    local usuario_id
+    local resposta_token
 
-    if [ -z "$url" ] || [ -z "$user" ] || [ -z "$pass" ]; then
-        criar_arquivo_portainer
+    PORTAINER_URL=$(ler_campo_arquivo "$dados_portainer_file" "Dominio do portainer: ")
+    USUARIO=$(ler_campo_arquivo "$dados_portainer_file" "Usuario: ")
+    SENHA=$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")
+    token_salvo=$(ler_campo_arquivo "$dados_portainer_file" "Token API: ")
+    [ -n "$token_salvo" ] || token_salvo=$(ler_campo_arquivo "$dados_portainer_file" "Token: ")
+
+    preparar_acesso_portainer "$PORTAINER_URL" || true
+
+    ## Um token válido é reaproveitado: nenhuma execução cria um segundo token.
+    if [ -n "$token_salvo" ] && portainer_api -fsS \
+        -H "X-API-Key: $token_salvo" \
+        "https://$PORTAINER_URL/api/users/me" \
+        | jq -e '.Id | numbers' >/dev/null 2>&1; then
+        PORTAINER_API_KEY="$token_salvo"
+        log_tecnico "token de automação existente reaproveitado"
+        return 0
     fi
-}
 
-verificar_arquivo_portainer() {
-    if [ ! -f "$dados_portainer_file" ]; then
-        criar_arquivo_portainer
+    jwt=$(portainer_api -fsS -X POST \
+        -H "Content-Type: application/json" \
+        --data "$(jq -n --arg usuario "$USUARIO" --arg senha "$SENHA" \
+            '{username: $usuario, password: $senha}')" \
+        "https://$PORTAINER_URL/api/auth" \
+        | jq -r '.jwt // empty' 2>/dev/null) || true
+
+    if [ -z "$jwt" ]; then
+        echo -e "$vermelho  ✖ Não foi possível autenticar no painel técnico.$reset"
+        echo -e "$bege    Verifique o endereço, o usuário e a senha do Portainer.$reset"
+        return 1
+    fi
+
+    usuario_atual=$(portainer_api -fsS \
+        -H "Authorization: Bearer $jwt" \
+        "https://$PORTAINER_URL/api/users/me" 2>/dev/null) || true
+    usuario_id=$(echo "$usuario_atual" | jq -r '.Id // empty' 2>/dev/null)
+    if [ -z "$usuario_id" ]; then
+        echo -e "$vermelho  ✖ Não foi possível identificar o usuário do painel técnico.$reset"
+        return 1
+    fi
+
+    resposta_token=$(portainer_api -fsS -X POST \
+        -H "Authorization: Bearer $jwt" \
+        -H "Content-Type: application/json" \
+        --data "$(jq -n --arg descricao "FZAP Installer" --arg senha "$SENHA" \
+            '{description: $descricao, password: $senha}')" \
+        "https://$PORTAINER_URL/api/users/$usuario_id/tokens" 2>/dev/null) || true
+    jwt=""
+
+    PORTAINER_API_KEY=$(echo "$resposta_token" \
+        | jq -r '.rawAPIKey // .RawAPIKey // empty' 2>/dev/null)
+    if [ -z "$PORTAINER_API_KEY" ]; then
+        echo -e "$vermelho  ✖ Não foi possível criar o token de automação do Portainer.$reset"
+        return 1
+    fi
+
+    if grep -q "^Token API:" "$dados_portainer_file"; then
+        atualizar_campo_arquivo "$dados_portainer_file" "Token API: " "$PORTAINER_API_KEY"
+    elif grep -q "^Token:" "$dados_portainer_file"; then
+        sed -i 's/^Token:/Token API:/' "$dados_portainer_file"
+        atualizar_campo_arquivo "$dados_portainer_file" "Token API: " "$PORTAINER_API_KEY"
     else
-        verificar_campos_portainer
+        atualizar_campo_arquivo "$dados_portainer_file" "Token API: " "$PORTAINER_API_KEY"
     fi
+
+    return 0
 }
 
 ## Deploy da stack via API do Portainer
+## Instala ou atualiza uma stack pela API do Portainer. Uma stack já existente é
+## atualizada (PUT), nunca recriada: é isso que permite retomar uma instalação
+## interrompida sem duplicar recursos.
 deploy() {
     local STACK_NAME="$1"
+    local stack_id
+    local response_output http_code response_body detalhe
 
-    echo ""
-    echo -e "$amarelo Iniciando deploy via Portainer API...$reset"
-    echo ""
-
-    ## Pega credenciais salvas
+    ## Compatibilidade: instalações antigas gravavam o domínio com o protocolo.
     sed -i 's|Dominio do portainer: https://||' "$dados_portainer_file" 2>/dev/null
 
-    PORTAINER_URL=$(grep "Dominio do portainer:" "$dados_portainer_file" | awk -F': ' '{print $2}')
-    USUARIO=$(grep "Usuario:" "$dados_portainer_file" | awk -F': ' '{print $2}')
-    SENHA=$(grep "Senha:" "$dados_portainer_file" | awk -F': ' '{print $2}')
+    obter_token_api_portainer || return 1
 
-    echo -e "1/6 - Credenciais carregadas"
-
-    ## Obtém token JWT
-    local tentativa=0
-    TOKEN=""
-    while [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; do
-        tentativa=$((tentativa + 1))
-        TOKEN=$(curl -k -s -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"username\":\"$USUARIO\",\"password\":\"$SENHA\"}" \
-            "https://$PORTAINER_URL/api/auth" | jq -r .jwt 2>/dev/null)
-
-        if [ "$tentativa" -ge 5 ]; then
-            echo -e "2/6 - $vermelho[ ERRO ] Falha ao obter token do Portainer após 5 tentativas$reset"
-            echo -e "      Verifique as credenciais e tente novamente."
-            sleep 3
-            criar_arquivo_portainer
-            return 1
-        fi
-        [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ] && sleep 3
-    done
-    echo -e "2/6 - Token obtido"
-
-    ## Salva token
-    sed -i "s|Token: .*|Token: $TOKEN|" "$dados_portainer_file"
-
-    ## Pega Endpoint ID
-    ENDPOINT_ID=$(curl -k -s -X GET \
-        -H "Authorization: Bearer $TOKEN" \
-        "https://$PORTAINER_URL/api/endpoints" | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null)
-    echo -e "3/6 - Endpoint ID: $bege$ENDPOINT_ID$reset"
-
-    ## Pega Swarm ID
-    SWARM_ID=$(curl -k -s -X GET \
-        -H "Authorization: Bearer $TOKEN" \
-        "https://$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/swarm" | jq -r .ID 2>/dev/null)
-    echo -e "4/6 - Swarm ID obtido"
-
-    ## Verifica Swarm
-    if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" != "active" ]; then
-        echo -e "5/6 - $vermelho[ ERRO ] Docker Swarm não está ativo$reset"
+    ENDPOINT_ID=$(portainer_api -s -X GET \
+        -H "X-API-Key: $PORTAINER_API_KEY" \
+        "https://$PORTAINER_URL/api/endpoints" \
+        | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null)
+    if [ -z "$ENDPOINT_ID" ]; then
+        item_falha "Não foi possível falar com o painel técnico."
+        log_tecnico "endpoint 'primary' não encontrado na API do Portainer"
         return 1
     fi
-    echo -e "5/6 - Docker Swarm ativo"
+    log_tecnico "endpoint primary=$ENDPOINT_ID"
 
-    ## Faz o deploy
-    local erro_output response_output http_code response_body
-    erro_output=$(mktemp)
-    response_output=$(mktemp)
+    SWARM_ID=$(portainer_api -s -X GET \
+        -H "X-API-Key: $PORTAINER_API_KEY" \
+        "https://$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/swarm" \
+        | jq -r .ID 2>/dev/null)
+    log_tecnico "swarm id obtido para o endpoint $ENDPOINT_ID"
 
-    http_code=$(curl -s -o "$response_output" -w "%{http_code}" -k -X POST \
-        -H "Authorization: Bearer $TOKEN" \
-        -F "Name=$STACK_NAME" \
-        -F "file=@$(pwd)/${STACK_NAME}.yaml" \
-        -F "SwarmID=$SWARM_ID" \
-        -F "endpointId=$ENDPOINT_ID" \
-        "https://$PORTAINER_URL/api/stacks/create/swarm/file" 2>"$erro_output")
-
-    response_body=$(cat "$response_output")
-
-    if [ "$http_code" -eq 200 ] && echo "$response_body" | grep -q '"Id"'; then
-        echo -e "6/6 - $verde[ OK ] Stack $bege$STACK_NAME$verde deployada com sucesso!$reset"
-    else
-        echo -e "6/6 - $vermelho[ ERRO ] Falha no deploy (HTTP $http_code)$reset"
-        echo -e "      $(echo "$response_body" | jq -r '.message // .details // .' 2>/dev/null)"
+    if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" != "active" ]; then
+        item_falha "O modo cluster do Docker não está ativo."
+        log_tecnico "docker swarm inativo no momento do deploy de $STACK_NAME"
+        return 1
     fi
 
-    rm -f "$erro_output" "$response_output"
-    echo ""
+    stack_id=$(portainer_api -s -X GET \
+        -H "X-API-Key: $PORTAINER_API_KEY" \
+        "https://$PORTAINER_URL/api/stacks" \
+        | jq -r --arg nome "$STACK_NAME" \
+            '.[] | select(.Name == $nome) | .Id' 2>/dev/null | head -1)
+
+    response_output=$(mktemp)
+
+    if [ -n "$stack_id" ]; then
+        log_tecnico "stack $STACK_NAME já existe (id=$stack_id): atualizando via PUT"
+        http_code=$(portainer_api -s -o "$response_output" -w "%{http_code}" -X PUT \
+            -H "X-API-Key: $PORTAINER_API_KEY" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -n --rawfile conteudo "${STACK_NAME}.yaml" \
+                '{StackFileContent: $conteudo, Env: [], Prune: true}')" \
+            "https://$PORTAINER_URL/api/stacks/$stack_id?endpointId=$ENDPOINT_ID" 2>/dev/null)
+    else
+        log_tecnico "stack $STACK_NAME não existe: criando via POST"
+        http_code=$(portainer_api -s -o "$response_output" -w "%{http_code}" -X POST \
+            -H "X-API-Key: $PORTAINER_API_KEY" \
+            -F "Name=$STACK_NAME" \
+            -F "file=@$(pwd)/${STACK_NAME}.yaml" \
+            -F "SwarmID=$SWARM_ID" \
+            -F "endpointId=$ENDPOINT_ID" \
+            "https://$PORTAINER_URL/api/stacks/create/swarm/file" 2>/dev/null)
+    fi
+
+    response_body=$(cat "$response_output")
+    rm -f "$response_output"
+
+    if [ "$http_code" = "200" ] && echo "$response_body" | grep -q '"Id"'; then
+        log_tecnico "stack $STACK_NAME aplicada com sucesso (HTTP $http_code)"
+        return 0
+    fi
+
+    detalhe=$(echo "$response_body" | jq -r '.message // .details // empty' 2>/dev/null)
+    log_tecnico "falha ao aplicar a stack $STACK_NAME (HTTP $http_code): ${detalhe:-sem detalhe}"
+    item_falha "Não foi possível instalar o componente ${STACK_NAME}."
+    return 1
 }
 
 requisitar_outra_instalacao() {
@@ -988,12 +1486,17 @@ _usar_existentes() {
         echo ""
 
         echo -e "$amarelo Passo 2/3$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 3/3$reset"
         echo -en "$amarelo E-mail SSL configurado no Traefik: $reset" && read -r email_ssl
         echo ""
+
+        url_portainer=$(normalizar_dominio "$url_portainer")
+        validar_dominio "$url_portainer" || continue
+        validar_rede_docker "$nome_rede_interna" || continue
+        validar_email "$email_ssl" || continue
 
         clear
         nome_traefik_portainer
@@ -1012,8 +1515,6 @@ _usar_existentes() {
         nome_traefik_portainer
         preencha_as_info
     done
-
-    url_portainer=$(normalizar_dominio "$url_portainer")
 
     mkdir -p dados_vps
 
@@ -1045,7 +1546,7 @@ _instalar_apenas_traefik() {
 
     while true; do
         echo -e "$amarelo Passo 1/3$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 2/3$reset"
@@ -1055,6 +1556,11 @@ _instalar_apenas_traefik() {
         echo -e "$amarelo Passo 3/3$reset"
         echo -en "$amarelo Domínio do Portainer existente (ex: portainer.seudominio.com): $reset" && read -r url_portainer
         echo ""
+
+        url_portainer=$(normalizar_dominio "$url_portainer")
+        validar_rede_docker "$nome_rede_interna" || continue
+        validar_email "$email_ssl" || continue
+        validar_dominio "$url_portainer" || continue
 
         clear
         nome_traefik_portainer
@@ -1073,8 +1579,6 @@ _instalar_apenas_traefik() {
         nome_traefik_portainer
         preencha_as_info
     done
-
-    url_portainer=$(normalizar_dominio "$url_portainer")
 
     clear
     instalando_msg
@@ -1126,19 +1630,25 @@ _instalar_apenas_portainer() {
         while true; do
             echo -e "$amarelo Passo 3/5$reset"
             echo -e "$bege --> Mínimo 12 caracteres$reset"
-            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
+            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -rs pass_portainer
             echo ""
             validar_senha "$pass_portainer" 12 && break
         done
 
         echo -e "$amarelo Passo 4/5$reset"
         echo -e "$bege --> Deve ser a mesma rede que o Traefik existente usa$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 5/5$reset"
         echo -en "$amarelo E-mail para certificado SSL: $reset" && read -r email_ssl
         echo ""
+
+        url_portainer=$(normalizar_dominio "$url_portainer")
+        validar_dominio "$url_portainer" || continue
+        validar_usuario_portainer "$user_portainer" || continue
+        validar_rede_docker "$nome_rede_interna" || continue
+        validar_email "$email_ssl" || continue
 
         clear
         nome_traefik_portainer
@@ -1159,8 +1669,6 @@ _instalar_apenas_portainer() {
         nome_traefik_portainer
         preencha_as_info
     done
-
-    url_portainer=$(normalizar_dominio "$url_portainer")
 
     clear
     instalando_msg
@@ -1183,7 +1691,7 @@ _instalar_apenas_portainer() {
         echo ""
         echo "Senha: $pass_portainer"
         echo ""
-        echo "Token: "
+        echo "Token API: "
     } > dados_vps/dados_portainer
 
     echo -e "$verde  ✔ Dados salvos$reset"
@@ -1277,67 +1785,59 @@ verificar_infraestrutura_existente() {
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
 ferramenta_traefik_e_portainer() {
+    local continuar_para_fzap="${1:-false}"
 
     recursos 1 1 && return
 
-    verificar_infraestrutura_existente || return
+    if [ "$continuar_para_fzap" != true ]; then
+        verificar_infraestrutura_existente || return
+    fi
 
     clear
     nome_traefik_portainer
     preencha_as_info
 
     while true; do
+        user_portainer="admin"
+        pass_portainer=$(gerar_token 24)
+        nome_rede_interna="$rede_padrao"
 
-        echo -e "$amarelo Passo 1/5$reset"
-        echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo -e "$amarelo Passo 1/2$reset"
+        echo -e "$bege Este é o endereço do painel técnico usado para administrar o FZAP.$reset"
+        echo -en "$amarelo Endereço do painel (ex: painel.seudominio.com): $reset" && read -r url_portainer
         echo ""
 
-        echo -e "$amarelo Passo 2/5$reset"
-        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        echo -e "$amarelo Passo 2/2$reset"
+        echo -e "$bege Usaremos este e-mail nos avisos do certificado HTTPS.$reset"
+        echo -en "$amarelo E-mail (ex: contato@seudominio.com): $reset" && read -r email_ssl
         echo ""
 
-        while true; do
-            echo -e "$amarelo Passo 3/5$reset"
-            echo -e "$bege --> Mínimo 12 caracteres$reset"
-            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -r pass_portainer
-            echo ""
-            validar_senha "$pass_portainer" 12 && break
-        done
-
-        echo -e "$amarelo Passo 4/5$reset"
-        echo -e "$bege --> Sem espaços ou caracteres especiais$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: FloudsNet): $reset" && read -r nome_rede_interna
-        echo ""
-
-        echo -e "$amarelo Passo 5/5$reset"
-        echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && read -r email_ssl
-        echo ""
+        url_portainer=$(normalizar_dominio "$url_portainer")
+        validar_dominio "$url_portainer" || continue
+        validar_email "$email_ssl" || continue
 
         clear
         nome_traefik_portainer
         conferindo_as_info
 
-        echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
+        echo -e "$amarelo Painel técnico:$branco https://$url_portainer$reset"
         echo ""
-        echo -e "$amarelo Usuário:$branco $user_portainer$reset"
+        echo -e "$amarelo Acesso seguro (HTTPS):$branco será ativado$reset"
         echo ""
-        echo -e "$amarelo Senha:$branco $pass_portainer$reset"
+        echo -e "$amarelo Usuário do painel:$branco admin$reset"
         echo ""
-        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
+        echo -e "$amarelo Senha do painel:$branco será gerada automaticamente$reset"
         echo ""
-        echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
-        echo ""
+        echo -e "$amarelo Rede interna:$branco configurada automaticamente$reset"
         echo ""
 
-        read -rp "As informações estão corretas? (Y/N): " confirmacao
-        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
+        read -rp "Continuar com a preparação do servidor? [S/n]: " confirmacao
+        [ -z "$confirmacao" ] || [ "$confirmacao" = "S" ] || [ "$confirmacao" = "s" ] && break
 
         clear
         nome_traefik_portainer
         preencha_as_info
     done
-
-    url_portainer=$(normalizar_dominio "$url_portainer")
 
     clear
     instalando_msg
@@ -1364,7 +1864,7 @@ ferramenta_traefik_e_portainer() {
         echo ""
         echo "Senha: $pass_portainer"
         echo ""
-        echo "Token: "
+        echo "Token API: "
     } > dados_vps/dados_portainer
 
     echo -e "$verde  ✔ Dados salvos$reset"
@@ -1379,177 +1879,150 @@ ferramenta_traefik_e_portainer() {
     deploy_portainer || return
     init_portainer_admin || return
 
+    if [ "$continuar_para_fzap" = true ]; then
+        echo -e "$verde  ✔ Servidor preparado. Continuando para a instalação do FZAP.$reset"
+        echo ""
+        return 0
+    fi
+
     instalado_msg
     guarde_os_dados_msg
 
-    echo -e "$verde [ TRAEFIK & PORTAINER ]$reset"
+    echo -e "$verde [ SERVIDOR PREPARADO ]$reset"
     echo ""
-    echo -e "$amarelo URL do Portainer:$branco https://$url_portainer$reset"
+    echo -e "$amarelo Painel técnico:$branco https://$url_portainer$reset"
     echo ""
     echo -e "$amarelo Usuário:$branco $user_portainer$reset"
     echo ""
     echo -e "$amarelo Senha:$branco $pass_portainer$reset"
     echo ""
-
-    requisitar_outra_instalacao
+    echo -e "$bege As credenciais também foram salvas em /root/dados_vps.$reset"
+    echo ""
+    read -rp "Pressione ENTER para voltar ao menu..."
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 ## [2] FZAP (stacks independentes: postgres + fzap)
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-ferramenta_fzap() {
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## COLETA DE DADOS
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-    recursos 1 2 && return
-
-    clear
-
-    dados
-
-    nome_fzap
-    preencha_as_info
+perguntar_dominio_base() {
+    local resposta
 
     while true; do
-
-        echo -e "$amarelo Passo 1/3$reset"
-        echo -en "$amarelo Digite o domínio da Fzap (ex: fzap.seudominio.com): $reset" && read -r url_fzap
+        echo -e "$branco Qual é o seu domínio?$reset"
+        echo -e "$bege Exemplo: minhaempresa.com.br$reset"
+        echo ""
+        read -rp " > " resposta
         echo ""
 
-        echo -e "$amarelo Passo 2/3 — Idioma$reset"
-        echo -e " $amarelo[1]$reset pt-BR    (Português)"
-        echo -e " $amarelo[2]$reset en-US    (English)"
-        echo -e " $amarelo[3]$reset es-LATAM (Español)"
-        echo ""
-        read -rp " Escolha [1-3]: " escolha_idioma
-        case "$escolha_idioma" in
-            2) fzap_language="en-US" ;;
-            3) fzap_language="es-LATAM" ;;
-            *) fzap_language="pt-BR" ;;
-        esac
-        echo ""
+        resposta=$(normalizar_dominio "$resposta")
+        if [ -z "$resposta" ]; then
+            item_falha "Informe um domínio para continuar."
+            echo ""
+            continue
+        fi
+        if ! eh_dominio_valido "$resposta"; then
+            item_falha "Domínio inválido. Informe apenas o domínio, sem http:// e sem barras."
+            echo ""
+            continue
+        fi
 
-        echo -e "$amarelo Passo 3/3$reset"
-        echo -e "$bege --> Opcional. Deixe em branco para usar a versão free$reset"
-        echo -en "$amarelo Chave de licença Flouds (pressione Enter para pular): $reset" && read -r licence_key
-        echo ""
-
-        ## Auto-gera credenciais
-        senha_postgres=$(gerar_token 24)
-        admin_token=$(gerar_token 32)
-
-        clear
-        nome_fzap
-        conferindo_as_info
-
-        echo -e "$amarelo Domínio da Fzap:$branco $url_fzap$reset"
-        echo ""
-        echo -e "$amarelo Idioma:$branco $fzap_language$reset"
-        echo ""
-        echo -e "$amarelo Rede interna:$branco $nome_rede_interna$reset"
-        echo ""
-        echo -e "$amarelo Licença:$branco ${licence_key:-versão free}$reset"
-        echo ""
-        echo -e "$amarelo Senha PostgreSQL:$branco (gerada automaticamente)$reset"
-        echo ""
-        echo -e "$amarelo Admin Token:$branco (gerado automaticamente)$reset"
-        echo ""
-        echo ""
-
-        read -rp "As informações estão corretas? (Y/N): " confirmacao
-        [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
-
-        clear
-        nome_fzap
-        preencha_as_info
+        dominio_base="$resposta"
+        return 0
     done
+}
 
-    ## Configurações opcionais do Chatwoot (só pergunta se licença preenchida)
+## O idioma tem padrão: quem não se importa pressiona Enter.
+perguntar_idioma() {
+    local escolha
+
+    while true; do
+        echo -e "$branco Idioma do FZAP$reset"
+        echo -e "$bege Enter usa pt-BR. Outras opções: 2 = en-US, 3 = es-LATAM$reset"
+        read -rp " > " escolha
+
+        case "$escolha" in
+            ""|1|pt-BR|pt-br) fzap_language="pt-BR"; break ;;
+            2|en-US|en-us)    fzap_language="en-US"; break ;;
+            3|es-LATAM|es-latam) fzap_language="es-LATAM"; break ;;
+            *) item_falha "Opção inválida. Pressione Enter, ou digite 2 ou 3." ;;
+        esac
+    done
+    echo ""
+}
+
+## O e-mail é sempre solicitado: ele sai deste servidor e vai para a Let's
+## Encrypt, então não é um campo que o instalador deva preencher sozinho.
+perguntar_email() {
+    while true; do
+        echo -e "$branco E-mail para avisos de vencimento do certificado$reset"
+        echo -e "$bege Exemplo: contato@${dominio_base:-suaempresa.com.br}$reset"
+        read -rp " > " email_ssl
+        validar_email "$email_ssl" && break
+    done
+    echo ""
+}
+
+perguntar_licenca() {
+    while true; do
+        echo -e "$branco Chave de licença Flouds$reset"
+        echo -e "$bege Enter usa a versão gratuita.$reset"
+        read -rp " > " licence_key
+        validar_texto_livre "$licence_key" 512 && break
+    done
+    echo ""
+}
+
+## Campos comerciais do Chatwoot. Só aparecem para quem informou licença.
+perguntar_chatwoot() {
     chatwoot_identifier=""
     chatwoot_system_name=""
     chatwoot_platform_name=""
     chatwoot_service_url=""
 
-    if [ -n "$licence_key" ]; then
-        clear
-        nome_fzap
+    [ -n "$licence_key" ] || return 0
 
-        echo -e "$amarelo====================================================================================================$reset"
-        echo -e "$amarelo=                                                                                                  =$reset"
-        echo -e "$amarelo=          $branco Configurações opcionais do Chatwoot — pressione Enter para pular                $amarelo=$reset"
-        echo -e "$amarelo=                                                                                                  =$reset"
-        echo -e "$amarelo====================================================================================================$reset"
-        echo ""
-        echo ""
-
-        echo -e "$amarelo CHATWOOT_SYSTEM_IDENTIFIER$reset"
-        echo -e "$bege --> Identificador do contato de onboarding (ex: flouds.com.br)$reset"
-        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_identifier
-        echo ""
-
-        echo -e "$amarelo CHATWOOT_SYSTEM_NAME$reset"
-        echo -e "$bege --> Nome exibido no contato de onboarding (ex: FZAP)$reset"
-        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_system_name
-        echo ""
-
-        echo -e "$amarelo CHATWOOT_PLATFORM_NAME$reset"
-        echo -e "$bege --> Nome da plataforma Chatwoot white label (padrão: Chatwoot)$reset"
-        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_platform_name
-        echo ""
-
-        echo -e "$amarelo CHATWOOT_SERVICE_URL$reset"
-        echo -e "$bege --> URL onde o Chatwoot está instalado (ex: https://chatwoot.seudominio.com)$reset"
-        echo -en "$amarelo Valor (Enter para pular): $reset" && read -r chatwoot_service_url
-        echo ""
-    fi
-
-    clear
-    instalando_msg
-
-    cd /root || exit 1
-
-    ## Monta linhas condicionais do Chatwoot para o YAML
-    if [ -n "$chatwoot_identifier" ]; then
-        line_chatwoot_identifier="      - CHATWOOT_SYSTEM_IDENTIFIER=${chatwoot_identifier}"
-    else
-        line_chatwoot_identifier="      #- CHATWOOT_SYSTEM_IDENTIFIER="
-    fi
-
-    if [ -n "$chatwoot_system_name" ]; then
-        line_chatwoot_system_name="      - CHATWOOT_SYSTEM_NAME=${chatwoot_system_name}"
-    else
-        line_chatwoot_system_name="      #- CHATWOOT_SYSTEM_NAME="
-    fi
-
-    if [ -n "$chatwoot_platform_name" ]; then
-        line_chatwoot_platform_name="      - CHATWOOT_PLATFORM_NAME=${chatwoot_platform_name}"
-    else
-        line_chatwoot_platform_name="      #- CHATWOOT_PLATFORM_NAME=Chatwoot"
-    fi
-
-    if [ -n "$chatwoot_service_url" ]; then
-        line_chatwoot_service_url="      - CHATWOOT_SERVICE_URL=${chatwoot_service_url}"
-    else
-        line_chatwoot_service_url="      #- CHATWOOT_SERVICE_URL="
-    fi
-
-    ## Garante que a rede exista
-    if [ -n "$nome_rede_interna" ]; then
-        docker network create --driver=overlay --attachable "$nome_rede_interna" > /dev/null 2>&1 || true
-    fi
-
-    ## Garante credenciais do Portainer
-    verificar_arquivo_portainer
-
-    ## -------------------------------------------------------------------------
-    ## STACK 1: postgres
-    ## -------------------------------------------------------------------------
-
-    echo -e "$amarelo• Criando volume do banco de dados...$reset"
-    docker volume create fzap_dbdata > /dev/null 2>&1
-    echo -e "$verde  ✔ Volume fzap_dbdata criado$reset"
+    echo -e "$branco Integração com o Chatwoot$reset"
+    echo -e "$bege Todos os campos abaixo são opcionais. Enter pula cada um.$reset"
     echo ""
 
-    echo -e "$amarelo• Gerando stack postgres...$reset"
+    while true; do
+        echo -en "$amarelo Identificador do contato de onboarding: $reset"
+        read -r chatwoot_identifier
+        [ -z "$chatwoot_identifier" ] && break
+        chatwoot_identifier=$(normalizar_dominio "$chatwoot_identifier")
+        validar_dominio "$chatwoot_identifier" && break
+    done
+
+    while true; do
+        echo -en "$amarelo Nome exibido no onboarding: $reset"
+        read -r chatwoot_system_name
+        validar_texto_livre "$chatwoot_system_name" 100 && break
+    done
+
+    while true; do
+        echo -en "$amarelo Nome da plataforma Chatwoot: $reset"
+        read -r chatwoot_platform_name
+        validar_texto_livre "$chatwoot_platform_name" 100 && break
+    done
+
+    while true; do
+        echo -en "$amarelo URL do Chatwoot (https://...): $reset"
+        read -r chatwoot_service_url
+        validar_url_https_opcional "$chatwoot_service_url" && break
+    done
+    echo ""
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## GERAÇÃO DAS STACKS DO FZAP
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+gerar_postgres_yaml() {
     cat > postgres.yaml << EOF
 version: "3.7"
 
@@ -1587,24 +2060,38 @@ networks:
     external: true
     name: ${nome_rede_interna}
 EOF
-    echo -e "$verde  ✔ YAML postgres gerado$reset"
-    echo ""
+}
 
-    deploy "postgres"
+gerar_fzap_yaml() {
+    local line_chatwoot_identifier
+    local line_chatwoot_system_name
+    local line_chatwoot_platform_name
+    local line_chatwoot_service_url
 
-    ## -------------------------------------------------------------------------
-    ## STACK 2: fzap
-    ## -------------------------------------------------------------------------
+    if [ -n "$chatwoot_identifier" ]; then
+        line_chatwoot_identifier="      - $(yaml_quote "CHATWOOT_SYSTEM_IDENTIFIER=${chatwoot_identifier}")"
+    else
+        line_chatwoot_identifier="      #- CHATWOOT_SYSTEM_IDENTIFIER="
+    fi
 
-    echo -e "$amarelo• Criando volumes da aplicação...$reset"
-    docker volume create fzap_files > /dev/null 2>&1
-    docker volume create fzap_logos > /dev/null 2>&1
-    echo -e "$verde  ✔ Volumes fzap_files e fzap_logos criados$reset"
-    echo ""
+    if [ -n "$chatwoot_system_name" ]; then
+        line_chatwoot_system_name="      - $(yaml_quote "CHATWOOT_SYSTEM_NAME=${chatwoot_system_name}")"
+    else
+        line_chatwoot_system_name="      #- CHATWOOT_SYSTEM_NAME="
+    fi
 
-    ## Em Docker Swarm, serviços de stacks diferentes na mesma rede
-    ## são acessados pelo nome completo: <stack>_<service>
-    echo -e "$amarelo• Gerando stack fzap...$reset"
+    if [ -n "$chatwoot_platform_name" ]; then
+        line_chatwoot_platform_name="      - $(yaml_quote "CHATWOOT_PLATFORM_NAME=${chatwoot_platform_name}")"
+    else
+        line_chatwoot_platform_name="      #- CHATWOOT_PLATFORM_NAME=Chatwoot"
+    fi
+
+    if [ -n "$chatwoot_service_url" ]; then
+        line_chatwoot_service_url="      - $(yaml_quote "CHATWOOT_SERVICE_URL=${chatwoot_service_url}")"
+    else
+        line_chatwoot_service_url="      #- CHATWOOT_SERVICE_URL="
+    fi
+
     cat > fzap.yaml << EOF
 version: "3.7"
 
@@ -1615,6 +2102,7 @@ services:
     networks:
       - ${nome_rede_interna}
     volumes:
+      - fzap_app_dbdata:/app/dbdata
       - fzap_files:/app/files
       - fzap_logos:/app/data/public-folder-logos
     environment:
@@ -1624,14 +2112,25 @@ services:
       - FZAP_LANGUAGE=${fzap_language}
       - PUBLIC_BASE_URL=https://${url_fzap}
       #- LOG_LEVEL=info
+      #- LOG_CALLER=false
+      #- GLOBAL_PROXY_URL=
+      #- PASSKEY_EXTENSION_URL=https://chromewebstore.google.com/detail/flgabjglebaiodaikmdohnmdkebndlpj
 ${line_chatwoot_identifier}
 ${line_chatwoot_system_name}
 ${line_chatwoot_platform_name}
 ${line_chatwoot_service_url}
 
+      # --- Banco global do Chatwoot (opcional) ---
+      # Usado apenas pelas instâncias que habilitam acesso direto ao banco.
+      #- CHATWOOT_GLOBAL_DB_HOST=
+      #- CHATWOOT_GLOBAL_DB_PORT=5432
+      #- CHATWOOT_GLOBAL_DB_NAME=
+      #- CHATWOOT_GLOBAL_DB_USER=
+      #- CHATWOOT_GLOBAL_DB_PASS=
+
       # --- Autenticação e Licença ---
       - ADMIN_TOKEN=${admin_token}
-      - FLOUDS_LICENCE_KEY=${licence_key}
+      - $(yaml_quote "FLOUDS_LICENCE_KEY=${licence_key}")
       #- FLOUDS_LIFETIME_LICENCE_KEY=
 
       # --- Banco de Dados (PostgreSQL) ---
@@ -1646,6 +2145,28 @@ ${line_chatwoot_service_url}
       - SESSION_DEVICE_NAME=Fzap
       - WEBHOOK_FORMAT=json
       #- IMAGE_QUALITY_HD=false
+      #- MAX_FILE_SIZE_MB=40
+      #- DOWNLOAD_TIMEOUT_SECONDS=120
+      #- MESSAGE_DELIVERY_TIMEOUT_SECONDS=30
+
+      # --- Armazenamento S3 global (opcional) ---
+      # Ativado quando bucket, access key e secret key estiverem preenchidos.
+      #- GLOBAL_S3_BUCKET=
+      #- GLOBAL_S3_ACCESS_KEY=
+      #- GLOBAL_S3_SECRET_KEY=
+      #- GLOBAL_S3_ENDPOINT=
+      #- GLOBAL_S3_REGION=
+      #- GLOBAL_S3_PATH_STYLE=
+      #- GLOBAL_S3_PUBLIC_URL=
+      #- GLOBAL_S3_MEDIA_DELIVERY=both
+      #- GLOBAL_S3_RETENTION_DAYS=
+
+      # --- Transcrição de áudio (opcional) ---
+      #- TRANSCRIPTION_ENABLED=false
+      #- TRANSCRIPTION_PROVIDER=openai
+      #- TRANSCRIPTION_API_KEY=
+      #- TRANSCRIPTION_MODEL=
+      #- TRANSCRIPTION_BASE_URL=
 
       # --- WhatsApp Cloud API (Meta Embedded Signup) ---
       #- META_APP_ID=
@@ -1661,6 +2182,9 @@ ${line_chatwoot_service_url}
       #- RABBITMQ_HEARTBEAT=30
       #- RABBITMQ_MAX_RECONNECT=10
       #- RABBITMQ_RECONNECT_DELAY=5
+      #- RABBITMQ_MAX_DELIVERY_ATTEMPTS=5
+      #- RABBITMQ_DLQ_TTL_HOURS=168
+      #- RABBITMQ_DLQ_MAX_LENGTH=10000
 
       # --- Monitoramento de Erros (Sentry) ---
       #- SENTRY_DSN=
@@ -1685,6 +2209,9 @@ ${line_chatwoot_service_url}
         - traefik.http.services.fzap.loadbalancer.server.port=8080
 
 volumes:
+  fzap_app_dbdata:
+    name: fzap_app_dbdata
+    external: true
   fzap_files:
     name: fzap_files
     external: true
@@ -1697,50 +2224,1154 @@ networks:
     external: true
     name: ${nome_rede_interna}
 EOF
-    echo -e "$verde  ✔ YAML fzap gerado$reset"
-    echo ""
-
-    deploy "fzap"
-
-    instalado_msg
-    guarde_os_dados_msg
-
-    echo -e "$verde [ FZAP ]$reset"
-    echo ""
-    echo -e "$amarelo URL:$branco https://$url_fzap$reset"
-    echo ""
-    echo -e "$amarelo Admin Token:$branco $admin_token$reset"
-    echo ""
-    echo -e "$amarelo Licença:$branco ${licence_key:-versão free}$reset"
-    echo ""
-    echo -e "$verde [ BANCO DE DADOS ]$reset"
-    echo ""
-    echo -e "$amarelo Host (interno):$branco postgres_postgres$reset"
-    echo ""
-    echo -e "$amarelo Porta:$branco 5432$reset"
-    echo ""
-    echo -e "$amarelo Usuário:$branco postgres$reset"
-    echo ""
-    echo -e "$amarelo Senha:$branco $senha_postgres$reset"
-    echo ""
-    echo -e "$amarelo Database:$branco fzap$reset"
-    echo ""
-    echo -e "$bege ℹ Configurações avançadas (Meta, RabbitMQ, Sentry e outras) podem ser$reset"
-    echo -e "$bege   preenchidas diretamente na stack da Fzap dentro do Portainer.$reset"
-    echo ""
-
-    requisitar_outra_instalacao
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
-## MENU
+## EXECUÇÃO COM PROGRESSO
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-menu_instalador() {
-    echo -e "${amarelo}[ 1 ]${reset} - ${branco}Traefik & Portainer${reset}"
-    echo -e "${amarelo}[ 2 ]${reset} - ${branco}Fzap${reset}"
+passo_atual=0
+passos_total=0
+
+## Executa uma etapa técnica mostrando uma linha comum na tela e mandando toda
+## a saída detalhada para o log. Em --verbose a saída também aparece na tela.
+executar_passo() {
+    local rotulo="$1"
+    shift
+    local resultado
+
+    passo_atual=$((passo_atual + 1))
+    log_tecnico "passo ${passo_atual}/${passos_total}: ${rotulo}"
+
+    printf ' %b●%b %s...' "$amarelo" "$reset" "$rotulo"
+
+    if [ "$modo_verbose" = true ]; then
+        echo ""
+        "$@" 2>&1 | tee -a "$log_file"
+        resultado=${PIPESTATUS[0]}
+    else
+        "$@" >> "$log_file" 2>&1
+        resultado=$?
+    fi
+
+    if [ "$resultado" -eq 0 ]; then
+        printf '\r %b✔%b %s                    \n' "$verde" "$reset" "$rotulo"
+        log_tecnico "concluído: ${rotulo}"
+    else
+        printf '\r %b✖%b %s                    \n' "$vermelho" "$reset" "$rotulo"
+        log_tecnico "falhou: ${rotulo} (código ${resultado})"
+    fi
+
+    return "$resultado"
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## VERIFICAÇÕES OBJETIVAS
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Verdadeiro quando todos os serviços da stack têm as réplicas esperadas.
+stack_saudavel() {
+    local stack="$1"
+    local pendentes
+    local servicos
+
+    servicos=$(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null)
+    [ -n "$servicos" ] || return 1
+
+    pendentes=$(docker stack services "$stack" --format "{{.Replicas}}" 2>/dev/null | awk '{
+        split($1, replicas, "/")
+        if (replicas[1] != replicas[2] || replicas[2] == "0") print
+    }')
+    [ -z "$pendentes" ]
+}
+
+## Verdadeiro quando a stack acumula tarefas falhando: sinal de serviço em
+## ciclo de reinício, que não pode ser confundido com uma stack saudável.
+stack_em_reinicio() {
+    local stack="$1"
+    local servico
+    local falhas
+
+    for servico in $(docker stack services "$stack" --format "{{.Name}}" 2>/dev/null); do
+        falhas=$(docker service ps "$servico" --format "{{.CurrentState}}" 2>/dev/null \
+            | head -5 | grep -ciE "failed|rejected")
+        [ "${falhas:-0}" -ge 3 ] && return 0
+    done
+    return 1
+}
+
+## Responde por HTTPS, aceitando o certificado que estiver lá.
+url_responde() {
+    local dominio="$1"
+    local codigo
+
+    codigo=$(curl -k -sS -L -o /dev/null --max-time 15 -w "%{http_code}" \
+        "https://${dominio}" 2>/dev/null || true)
+    log_tecnico "resposta de https://${dominio}: ${codigo:-sem resposta}"
+    [[ "$codigo" =~ ^2[0-9][0-9]$ ]]
+}
+
+## Certificado emitido e confiável: aqui o -k é intencionalmente omitido.
+certificado_valido() {
+    local dominio="$1"
+
+    curl -sS -L -o /dev/null --max-time 15 "https://${dominio}" >/dev/null 2>&1
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ETAPA 1 DE 5 — VERIFICAR O SERVIDOR
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+etapa1_verificar_servidor() {
+    local sistema
+    local vcpu
+    local ram_kb
+    local ram
+    local portas_ocupadas=""
+    local atencao=false
+    local escolha
+    local faltando
+    local ferramenta
+
+    while true; do
+        titulo_etapa 1 "Verificando o servidor"
+
+        sistema=$(. /etc/os-release 2>/dev/null && echo "$PRETTY_NAME")
+        vcpu=$(nproc 2>/dev/null || echo 1)
+        ram_kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+        ram_kb=${ram_kb:-0}
+        ram=$(awk -v kb="$ram_kb" 'BEGIN { printf "%.1f", kb / 1000000 }')
+        atencao=false
+
+        item_ok "$(rotulo_valor "Sistema operacional" "${sistema:-Linux}")"
+        item_ok "$(rotulo_valor "Acesso de administrador" "ok")"
+
+        if [ "$vcpu" -lt 1 ] || [ "$ram_kb" -lt 1900000 ]; then
+            item_atencao "$(rotulo_valor "Recursos" "${vcpu} vCPU e ${ram} GB (recomendado: 1 vCPU e 2 GB)")"
+            atencao=true
+        else
+            item_ok "$(rotulo_valor "Recursos" "${vcpu} vCPU e ${ram} GB")"
+        fi
+
+        ## O bootstrap Setup instala essas dependências. Quem executa o
+        ## SetupFlouds direto pode não tê-las, e sem elas nada funciona.
+        faltando=""
+        for ferramenta in curl jq; do
+            command -v "$ferramenta" >/dev/null 2>&1 || faltando="$faltando $ferramenta"
+        done
+        if [ -n "$faltando" ]; then
+            item_falha "$(rotulo_valor "Programas necessários" "faltando:$faltando")"
+            atencao=true
+        else
+            item_ok "$(rotulo_valor "Programas necessários" "disponíveis")"
+        fi
+
+        if command -v docker >/dev/null 2>&1; then
+            item_ok "$(rotulo_valor "Docker" "instalado")"
+        else
+            item_pendente "$(rotulo_valor "Docker" "será instalado")"
+        fi
+
+        if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" = "active" ]; then
+            item_ok "$(rotulo_valor "Modo cluster" "ativo")"
+        else
+            item_pendente "$(rotulo_valor "Modo cluster" "será configurado")"
+        fi
+
+        portas_ocupadas=""
+        if command -v ss >/dev/null 2>&1; then
+            ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)80$' && portas_ocupadas="$portas_ocupadas 80"
+            ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)443$' && portas_ocupadas="$portas_ocupadas 443"
+        fi
+        if [ -n "$portas_ocupadas" ] && ! _tem_traefik; then
+            item_falha "$(rotulo_valor "Portas 80 e 443" "em uso por outro programa:$portas_ocupadas")"
+            atencao=true
+        else
+            item_ok "$(rotulo_valor "Portas 80 e 443" "disponíveis")"
+        fi
+
+        if _tem_traefik && _tem_portainer; then
+            item_ok "$(rotulo_valor "Preparação do servidor" "já feita")"
+        elif _tem_traefik || _tem_portainer; then
+            item_atencao "$(rotulo_valor "Preparação do servidor" "incompleta")"
+            atencao=true
+        else
+            item_pendente "$(rotulo_valor "Preparação do servidor" "será feita agora")"
+        fi
+
+        echo ""
+
+        if [ "$atencao" = false ]; then
+            linha_fina
+            read -rp " Pressione ENTER para continuar, ou 0 para sair: " escolha
+            [ "$escolha" = "0" ] && return 1
+            estado_gravar "verificado_servidor"
+            return 0
+        fi
+
+        if [ -n "$portas_ocupadas" ] && ! _tem_traefik; then
+            echo -e "$bege As portas 80 e 443 são usadas para publicar o FZAP na internet e$reset"
+            echo -e "$bege para emitir o certificado HTTPS. Elas precisam estar livres.$reset"
+            echo ""
+            echo -e " Programa que as ocupa hoje:"
+            ss -ltnpH 2>/dev/null | awk '$4 ~ /(^|:)(80|443)$/ {print "   " $4 "  " $6}' | head -5
+            echo ""
+        fi
+
+        if [ -n "$faltando" ]; then
+            echo -e "$bege Instale os programas que faltam e execute o instalador novamente:$reset"
+            echo ""
+            echo -e "   apt-get install -y$faltando"
+            echo ""
+        fi
+
+        if _tem_traefik && ! _tem_portainer || ! _tem_traefik && _tem_portainer; then
+            echo -e "$bege A preparação anterior deste servidor ficou pela metade. As$reset"
+            echo -e "$bege configurações avançadas permitem reparar apenas a parte que falta.$reset"
+            echo ""
+        fi
+
+        linha_fina
+        echo -e " $amarelo[1]$reset Verificar novamente — recomendado"
+        echo -e " $amarelo[2]$reset Continuar mesmo assim"
+        echo -e " $amarelo[0]$reset Sair"
+        echo ""
+        read -rp " Escolha: " escolha
+        case "$escolha" in
+            1) ;;
+            2) estado_gravar "verificado_servidor"; return 0 ;;
+            0) return 1 ;;
+            *) ;;
+        esac
+    done
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ETAPA 2 DE 5 — ENDEREÇOS
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## O domínio do painel é derivado do domínio-base, exceto quando já existe uma
+## infraestrutura registrada: nesse caso o endereço dela é preservado.
+derivar_enderecos() {
+    local painel_existente=""
+
+    url_fzap="fzap.${dominio_base}"
+
+    if [ -f "$dados_portainer_file" ]; then
+        painel_existente=$(ler_campo_arquivo "$dados_portainer_file" "Dominio do portainer: ")
+    fi
+
+    if [ -n "$painel_existente" ] && eh_dominio_valido "$painel_existente"; then
+        url_portainer="$painel_existente"
+        painel_reaproveitado=true
+    else
+        url_portainer="painel.${dominio_base}"
+        painel_reaproveitado=false
+    fi
+}
+
+etapa2_enderecos() {
+    local escolha
+    local resultado_fzap
+    local resultado_painel
+    local ip_vps
+
+    painel_reaproveitado=false
+
+    if [ -z "$dominio_base" ]; then
+        titulo_etapa 2 "Endereços"
+        perguntar_dominio_base || return 1
+    fi
+    derivar_enderecos
+
+    while true; do
+        titulo_etapa 2 "Endereços"
+
+        ip_vps=$(ip_publico)
+
+        checar_dns_host "$url_fzap"
+        resultado_fzap=$?
+        case "$resultado_fzap" in
+            0) item_ok "FZAP            $url_fzap" ;;
+            1) item_falha "FZAP            $url_fzap — ainda não aponta para cá" ;;
+            2) item_atencao "FZAP            $url_fzap — aponta para $dns_ips_encontrados" ;;
+            *) item_atencao "FZAP            $url_fzap — não foi possível confirmar" ;;
+        esac
+
+        checar_dns_host "$url_portainer"
+        resultado_painel=$?
+        case "$resultado_painel" in
+            0) item_ok "Painel técnico  $url_portainer" ;;
+            1) item_falha "Painel técnico  $url_portainer — ainda não aponta para cá" ;;
+            2) item_atencao "Painel técnico  $url_portainer — aponta para $dns_ips_encontrados" ;;
+            *) item_atencao "Painel técnico  $url_portainer — não foi possível confirmar" ;;
+        esac
+
+        echo ""
+        [ -n "$ip_vps" ] && echo -e "$bege O IP deste servidor é ${ip_vps}.$reset" && echo ""
+
+        if [ "$resultado_fzap" -eq 0 ] && [ "$resultado_painel" -eq 0 ]; then
+            estado_gravar "dns_ok"
+            linha_fina
+            read -rp " Pressione ENTER para continuar: " escolha
+            return 0
+        fi
+
+        [ "$resultado_fzap" -eq 1 ] && mostrar_registro_dns "$url_fzap" "$dominio_base"
+        [ "$resultado_painel" -eq 1 ] && mostrar_registro_dns "$url_portainer" "$dominio_base"
+
+        echo -e "$bege Você pode instalar agora e criar os registros depois: os endereços$reset"
+        echo -e "$bege passam a funcionar sozinhos quando o DNS estiver pronto. O HTTPS só$reset"
+        echo -e "$bege é ativado depois disso.$reset"
+        echo ""
+
+        linha_fina
+        echo -e " $amarelo[1]$reset Verificar novamente — recomendado"
+        echo -e " $amarelo[2]$reset Instalar agora e configurar o DNS depois"
+        echo -e " $amarelo[3]$reset Alterar os endereços"
+        echo -e " $amarelo[0]$reset Sair"
+        echo ""
+        read -rp " Escolha: " escolha
+
+        case "$escolha" in
+            1) ;;
+            2)
+                log_tecnico "usuário escolheu instalar antes de o DNS estar pronto"
+                estado_gravar "dns_ok"
+                return 0
+                ;;
+            3)
+                titulo_etapa 2 "Endereços"
+                perguntar_dominio_base || return 1
+                derivar_enderecos
+                ;;
+            0) return 1 ;;
+            *) ;;
+        esac
+    done
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ETAPA 3 DE 5 — CONFIGURAR O FZAP
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+etapa3_configurar() {
+    local escolha
+
+    titulo_etapa 3 "Configurar o FZAP"
+    perguntar_email
+    perguntar_idioma
+    perguntar_licenca
+    perguntar_chatwoot
+
+    while true; do
+        titulo_etapa 3 "Confira antes de instalar"
+
+        echo -e " FZAP            $branco https://$url_fzap$reset"
+        if [ "$painel_reaproveitado" = true ]; then
+            echo -e " Painel técnico  $branco https://$url_portainer$reset$bege (já existente)$reset"
+        else
+            echo -e " Painel técnico  $branco https://$url_portainer$reset"
+        fi
+        echo -e " E-mail          $branco $email_ssl$reset"
+        echo -e " Idioma          $branco $fzap_language$reset"
+        echo -e " Licença         $branco ${licence_key:+informada}${licence_key:-versão gratuita}$reset"
+        echo ""
+        echo -e "$bege O servidor será configurado automaticamente: HTTPS, rede interna,$reset"
+        echo -e "$bege banco de dados e painel técnico. A senha do painel e o token de$reset"
+        echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
+        echo ""
+
+        linha_fina
+        echo -e " $amarelo[1]$reset Instalar — recomendado"
+        echo -e " $amarelo[2]$reset Corrigir alguma informação"
+        echo -e " $amarelo[0]$reset Cancelar"
+        echo ""
+        read -rp " Escolha: " escolha
+
+        case "$escolha" in
+            1)
+                estado_gravar "dados_confirmados"
+                return 0
+                ;;
+            2)
+                titulo_etapa 3 "Corrigir informação"
+                echo -e " $amarelo[1]$reset Endereços"
+                echo -e " $amarelo[2]$reset E-mail"
+                echo -e " $amarelo[3]$reset Idioma"
+                echo -e " $amarelo[4]$reset Licença"
+                echo ""
+                read -rp " Escolha: " escolha
+                case "$escolha" in
+                    1) etapa2_enderecos || return 1 ;;
+                    2) titulo_etapa 3 "Configurar o FZAP"; perguntar_email ;;
+                    3) titulo_etapa 3 "Configurar o FZAP"; perguntar_idioma ;;
+                    4) titulo_etapa 3 "Configurar o FZAP"; perguntar_licenca; perguntar_chatwoot ;;
+                    *) ;;
+                esac
+                ;;
+            0) return 1 ;;
+            *) ;;
+        esac
+    done
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ETAPA 4 DE 5 — INSTALAR
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+salvar_dados_servidor() {
+    mkdir -p "$(dirname "$dados_vps")" || return 1
+    {
+        echo "[ SERVIDOR ]"
+        echo "Nome do Servidor: Flouds"
+        echo "Rede interna: $nome_rede_interna"
+        echo "Email SSL: $email_ssl"
+    } > "$dados_vps" || return 1
+    chmod 600 "$dados_vps"
+}
+
+salvar_dados_painel() {
+    {
+        echo "[ PORTAINER ]"
+        echo "Dominio do portainer: $url_portainer"
+        echo ""
+        echo "Usuario: $user_portainer"
+        echo ""
+        echo "Senha: $pass_portainer"
+        echo ""
+        echo "Token API: "
+    } > "$dados_portainer_file" || return 1
+    chmod 600 "$dados_portainer_file"
+}
+
+criar_volumes_postgres() {
+    docker volume create fzap_dbdata >/dev/null 2>&1
+    return 0
+}
+
+criar_volumes_fzap() {
+    docker volume create fzap_app_dbdata >/dev/null 2>&1
+    docker volume create fzap_files >/dev/null 2>&1
+    docker volume create fzap_logos >/dev/null 2>&1
+    return 0
+}
+
+## Lê uma variável de ambiente de um serviço já em execução. É por aqui que uma
+## retomada recupera os segredos gerados na execução anterior.
+recuperar_env_do_servico() {
+    local servico="$1"
+    local variavel="$2"
+
+    docker service inspect "$servico" \
+        --format '{{range .Spec.TaskTemplate.ContainerSpec.Env}}{{println .}}{{end}}' 2>/dev/null \
+        | awk -F= -v v="$variavel" '$1 == v { print substr($0, index($0, "=") + 1); exit }'
+}
+
+## Lê a mesma variável do arquivo da stack, quando o serviço não está de pé.
+recuperar_env_do_arquivo() {
+    local arquivo="$1"
+    local variavel="$2"
+
+    [ -f "$arquivo" ] || return 0
+    awk -v v="$variavel" '
+        {
+            linha = $0
+            sub(/^[[:space:]]*-[[:space:]]*/, "", linha)
+            sub(/^"/, "", linha)
+            sub(/"$/, "", linha)
+            if (index(linha, v "=") == 1) {
+                print substr(linha, length(v) + 2)
+                exit
+            }
+        }
+    ' "$arquivo"
+}
+
+## A senha do PostgreSQL só vale se for a mesma com que o volume foi
+## inicializado: gerar uma nova numa retomada deixaria o FZAP sem banco.
+restaurar_segredos_existentes() {
+    [ -n "$senha_postgres" ] || senha_postgres=$(recuperar_env_do_servico "postgres_postgres" "POSTGRES_PASSWORD")
+    [ -n "$senha_postgres" ] || senha_postgres=$(recuperar_env_do_arquivo "postgres.yaml" "POSTGRES_PASSWORD")
+    [ -n "$admin_token" ] || admin_token=$(recuperar_env_do_servico "fzap_fzap" "ADMIN_TOKEN")
+    [ -n "$admin_token" ] || admin_token=$(recuperar_env_do_arquivo "fzap.yaml" "ADMIN_TOKEN")
+
+    [ -n "$senha_postgres" ] && log_tecnico "senha do banco recuperada da instalação anterior"
+    [ -n "$admin_token" ] && log_tecnico "token de administrador recuperado da instalação anterior"
+    return 0
+}
+
+instalar_banco() {
+    ## Um banco já saudável não é reiniciado sem motivo.
+    if stack_saudavel "postgres"; then
+        log_tecnico "stack postgres já saudável: nada a fazer"
+        return 0
+    fi
+
+    criar_volumes_postgres
+    gerar_postgres_yaml || return 1
+    deploy "postgres" || return 1
+    wait_stack "postgres" || return 1
+}
+
+instalar_aplicacao() {
+    ## Uma retentativa por causa de DNS ou certificado não precisa reiniciar a
+    ## aplicação. Um endereço diferente do que está no ar, sim.
+    if stack_saudavel "fzap" \
+        && [ "$(recuperar_env_do_servico "fzap_fzap" "PUBLIC_BASE_URL")" = "https://${url_fzap}" ]; then
+        log_tecnico "stack fzap já saudável no endereço esperado: nada a fazer"
+        return 0
+    fi
+
+    criar_volumes_fzap
+    gerar_fzap_yaml || return 1
+    deploy "fzap" || return 1
+    wait_stack "fzap" || return 1
+}
+
+## Prepara Traefik e Portainer sem fazer nenhuma pergunta: os dados já foram
+## coletados nas etapas 2 e 3. Uma infraestrutura já existente é reutilizada.
+preparar_infraestrutura() {
+    if _tem_traefik && _tem_portainer; then
+        if [ ! -f "$dados_portainer_file" ] \
+            || [ -z "$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")" ]; then
+            log_tecnico "infraestrutura existente sem credenciais registradas"
+            return 2
+        fi
+        user_portainer=$(ler_campo_arquivo "$dados_portainer_file" "Usuario: ")
+        pass_portainer=$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")
+        executar_passo "Infraestrutura existente reutilizada" true
+        executar_passo "Rede interna verificada" criar_rede_interna || return 1
+        ## Também é por aqui que passa a retentativa de uma preparação que
+        ## falhou justamente ao criar a conta do painel: init_portainer_admin
+        ## autentica quando a conta já existe e só cria quando falta.
+        executar_passo "Conta do painel verificada" init_portainer_admin || return 1
+        return 0
+    fi
+
+    user_portainer="admin"
+    pass_portainer=$(gerar_token 24)
+
+    executar_passo "Dados do servidor salvos" salvar_dados_servidor || return 1
+    executar_passo "Portas 80 e 443 liberadas" configurar_firewall_http_https || return 1
+    executar_passo "Docker preparado" preparar_docker_swarm || return 1
+    executar_passo "Rede interna criada" criar_rede_interna || return 1
+    executar_passo "Acesso HTTPS configurado" deploy_traefik || return 1
+    executar_passo "Painel técnico instalado" deploy_portainer || return 1
+    executar_passo "Credenciais do painel salvas" salvar_dados_painel || return 1
+    executar_passo "Conta do painel criada" init_portainer_admin || return 1
+    return 0
+}
+
+etapa4_instalar() {
+    local resultado
+
+    titulo_etapa 4 "Instalando"
+    passo_atual=0
+
+    ## Os arquivos das stacks são gerados no diretório de dados e enviados a
+    ## partir dele.
+    cd "$home_directory" || return 1
+
+    if _tem_traefik && _tem_portainer; then
+        passos_total=5
+    else
+        passos_total=10
+    fi
+
+    echo -e "$bege Isso leva de 2 a 5 minutos. Detalhes técnicos em$reset"
+    echo -e "$bege $log_file$reset"
     echo ""
-    echo -e "${amarelo}[ 0 ]${reset} - ${branco}Sair${reset}"
+
+    preparar_infraestrutura
+    resultado=$?
+    if [ "$resultado" -eq 2 ]; then
+        echo ""
+        item_atencao "A infraestrutura deste servidor existe, mas sem credenciais registradas."
+        echo ""
+        echo -e "$bege Abra as configurações avançadas e escolha reaproveitar a$reset"
+        echo -e "$bege infraestrutura para registrar os dados de acesso.$reset"
+        echo ""
+        read -rp " Pressione ENTER para voltar ao menu..."
+        return 1
+    fi
+    [ "$resultado" -eq 0 ] || return 1
+
+    estado_gravar "infra_pronta"
+
+    ## As credenciais da aplicação só são geradas quando a instalação começa —
+    ## e apenas se ainda não existirem de uma execução anterior.
+    restaurar_segredos_existentes
+    [ -n "$senha_postgres" ] || senha_postgres=$(gerar_token 24)
+    [ -n "$admin_token" ] || admin_token=$(gerar_token 32)
+
+    executar_passo "Banco de dados iniciado" instalar_banco || return 1
+    estado_gravar "postgres_saudavel"
+
+    executar_passo "FZAP instalado" instalar_aplicacao || return 1
+    estado_gravar "fzap_saudavel"
+
+    return 0
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## ETAPA 5 DE 5 — VERIFICAR E CONCLUIR
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Devolve o resultado real da instalação, sem arredondar:
+##   0 = tudo verificado
+##   1 = serviços no ar, mas o endereço ainda não responde por HTTPS
+##   2 = algum serviço essencial não está de pé
+etapa5_verificar() {
+    local tentativa
+    local banco_ok=false
+    local app_ok=false
+
+    titulo_etapa 5 "Verificando"
+
+    for tentativa in 1 2 3; do
+        stack_saudavel "postgres" && banco_ok=true && break
+        sleep 5
+    done
+    if [ "$banco_ok" = true ]; then
+        item_ok "Banco de dados respondendo"
+    else
+        item_falha "Banco de dados não iniciou"
+    fi
+
+    for tentativa in 1 2 3; do
+        stack_saudavel "fzap" && app_ok=true && break
+        sleep 5
+    done
+    if [ "$app_ok" = true ]; then
+        item_ok "FZAP em execução"
+    else
+        item_falha "FZAP não iniciou"
+    fi
+
+    if [ "$banco_ok" != true ] || [ "$app_ok" != true ]; then
+        echo ""
+        return 2
+    fi
+
+    if stack_em_reinicio "fzap" || stack_em_reinicio "postgres"; then
+        item_falha "Um serviço essencial está reiniciando repetidamente"
+        echo ""
+        return 2
+    fi
+    item_ok "Nenhum serviço em ciclo de reinício"
+
+    [ -n "$PORTAINER_API_KEY" ] || obter_token_api_portainer >/dev/null 2>&1 || true
+    [ -n "$PORTAINER_URL" ] || PORTAINER_URL="$url_portainer"
+
+    if [ -n "$PORTAINER_API_KEY" ] \
+        && preparar_acesso_portainer "$PORTAINER_URL" \
+        && portainer_api -fsS -H "X-API-Key: $PORTAINER_API_KEY" \
+            "https://$PORTAINER_URL/api/users/me" | jq -e '.Id | numbers' >/dev/null 2>&1; then
+        item_ok "Painel técnico respondendo"
+    else
+        item_atencao "Painel técnico ainda não confirmado"
+    fi
+
+    ## Sem endereço registrado não há o que testar: acontece ao verificar uma
+    ## instalação feita por uma versão anterior do instalador.
+    if [ -z "$url_fzap" ]; then
+        item_atencao "Endereço do FZAP não registrado neste servidor"
+        echo ""
+        return 1
+    fi
+
+    ## O certificado costuma levar alguns segundos após o serviço subir.
+    for tentativa in 1 2 3 4 5 6; do
+        certificado_valido "$url_fzap" && break
+        sleep 10
+    done
+
+    if certificado_valido "$url_fzap"; then
+        item_ok "Certificado HTTPS válido"
+        item_ok "Endereço acessível"
+        echo ""
+        return 0
+    fi
+
+    if url_responde "$url_fzap"; then
+        item_atencao "Certificado HTTPS ainda sendo emitido"
+    else
+        item_atencao "O endereço ainda não responde"
+    fi
+    echo ""
+    return 1
+}
+
+mostrar_credenciais_painel() {
+    local url user senha
+
+    url=$(ler_campo_arquivo "$dados_portainer_file" "Dominio do portainer: ")
+    user=$(ler_campo_arquivo "$dados_portainer_file" "Usuario: ")
+    senha=$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")
+
+    echo -e "$branco Painel técnico$reset"
+    echo -e " Endereço  https://$url"
+    echo -e " Usuário   $user"
+    echo -e " Senha     $senha"
+    echo ""
+    echo -e "$bege Use o painel técnico apenas para manutenção. Ele não é o FZAP.$reset"
+    echo ""
+}
+
+aviso_segredos_na_tela() {
+    echo -e "$bege As credenciais acima ficam no histórico deste terminal. Elas também$reset"
+    echo -e "$bege estão salvas em ${home_directory}/dados_vps, com acesso restrito ao$reset"
+    echo -e "$bege administrador do servidor.$reset"
+    echo ""
+}
+
+tela_conclusao_sucesso() {
+    instalado_msg
+
+    echo -e "$verde FZAP instalado com sucesso$reset"
+    echo ""
+    echo -e "$branco Abra agora:$reset"
+    echo -e "$verde https://$url_fzap$reset"
+    echo ""
+    echo -e "$branco Próximo passo:$reset"
+    echo -e " Abra o endereço acima e conecte seu WhatsApp."
+    echo ""
+    echo -e "$branco Token de administrador$reset"
+    echo -e " $admin_token"
+    echo ""
+    mostrar_credenciais_painel
+    aviso_segredos_na_tela
+    read -rp " Pressione ENTER para finalizar..."
+}
+
+## Instalado, mas o resultado essencial ainda não está disponível. Não é
+## sucesso e não é falha: o servidor está pronto e falta o DNS ou o certificado.
+tela_conclusao_parcial() {
+    local resultado_fzap
+
+    clear
+    echo ""
+    echo -e "$amarelo FZAP instalado — aguardando o endereço$reset"
+    linha_fina
+    echo ""
+    echo -e " Os serviços estão rodando neste servidor. O endereço abaixo passa"
+    echo -e " a funcionar sozinho assim que o DNS estiver pronto."
+    echo ""
+
+    checar_dns_host "$url_fzap"
+    resultado_fzap=$?
+    if [ "$resultado_fzap" -eq 1 ]; then
+        mostrar_registro_dns "$url_fzap" "$dominio_base"
+    elif [ "$resultado_fzap" -eq 2 ]; then
+        item_atencao "$url_fzap aponta para $dns_ips_encontrados, e não para este servidor."
+        echo -e "$bege   Se você usa um proxy como o Cloudflare, isso é esperado.$reset"
+        echo ""
+    else
+        echo -e "$bege O DNS está correto. O certificado HTTPS está sendo emitido e$reset"
+        echo -e "$bege costuma ficar pronto em alguns minutos.$reset"
+        echo ""
+    fi
+
+    echo -e "$branco Depois:$reset $verde https://$url_fzap$reset"
+    echo ""
+    echo -e "$bege O idioma e a licença podem ser alterados depois no painel do FZAP.$reset"
+    echo ""
+    echo -e "$branco Token de administrador$reset"
+    echo -e " $admin_token"
+    echo ""
+    mostrar_credenciais_painel
+    aviso_segredos_na_tela
+
+    linha_fina
+    echo -e " $amarelo[1]$reset Verificar agora"
+    echo -e " $amarelo[0]$reset Sair"
+    echo ""
+}
+
+## Deixa a escolha em escolha_falha em vez de devolvê-la por stdout: uma tela
+## interativa capturada por $() não apareceria para o usuário.
+escolha_falha=""
+tela_falha_instalacao() {
+    clear
+    echo ""
+    echo -e "$vermelho O FZAP não conseguiu iniciar$reset"
+    linha_fina
+    echo ""
+    echo -e " Suas informações foram preservadas. Nada foi apagado."
+    echo ""
+    echo -e "$bege Ao executar o instalador novamente, ele retoma de onde parou.$reset"
+    echo ""
+
+    linha_fina
+    echo -e " $amarelo[1]$reset Tentar novamente"
+    echo -e " $amarelo[2]$reset Ver o motivo técnico"
+    echo -e " $amarelo[3]$reset Salvar diagnóstico para o suporte"
+    echo -e " $amarelo[0]$reset Sair"
+    echo ""
+    read -rp " Escolha: " escolha_falha
+}
+
+mostrar_motivo_tecnico() {
+    clear
+    echo ""
+    echo -e "$branco Últimas linhas do log técnico$reset"
+    linha_fina
+    echo ""
+    tail -40 "$log_file" 2>/dev/null || echo " Log ainda não disponível."
+    echo ""
+    echo -e "$bege Log completo em $log_file$reset"
+    echo ""
+    read -rp " Pressione ENTER para voltar..."
+}
+
+## Coleta estado dos serviços para o suporte. Não inclui variáveis de ambiente
+## nem o conteúdo dos arquivos de credenciais.
+salvar_diagnostico() {
+    local destino="${home_directory}/dados_vps/diagnostico_$(date '+%Y%m%d_%H%M%S').txt"
+    local servico
+
+    {
+        echo "== Instalador =="
+        echo "versao: $versao"
+        echo "data: $(date '+%Y-%m-%d %H:%M:%S')"
+        echo ""
+        echo "== Estado =="
+        ## A chave de licença é do cliente e não tem utilidade para o suporte:
+        ## fica fora do arquivo que sai deste servidor.
+        grep -v "^Licenca:" "$estado_file" 2>/dev/null
+        echo ""
+        echo "== Serviços =="
+        docker service ls 2>&1
+        echo ""
+        for servico in postgres fzap traefik portainer; do
+            echo "== Tarefas da stack $servico =="
+            docker stack ps "$servico" --no-trunc 2>&1 | head -20
+            echo ""
+        done
+        echo "== Log do instalador =="
+        tail -200 "$log_file" 2>/dev/null
+    } > "$destino" 2>/dev/null
+
+    chmod 600 "$destino" 2>/dev/null
+
+    echo ""
+    item_ok "Diagnóstico salvo em $destino"
+    echo ""
+    echo -e "$bege O arquivo contém o estado dos serviços e o log do instalador.$reset"
+    echo -e "$bege Ele não contém senhas nem tokens.$reset"
+    echo ""
+    read -rp " Pressione ENTER para voltar..."
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## MANUTENÇÃO E REENTRADA
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Uma instalação que escolheu "configurar o DNS depois" pode ter esgotado as
+## tentativas de emissão do certificado. Reiniciar o Traefik força uma nova
+## rodada sem esperar o backoff.
+reemitir_certificado() {
+    clear
+    echo ""
+    echo -e "$branco Emitir o certificado HTTPS novamente$reset"
+    linha_fina
+    echo ""
+
+    if ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^traefik_traefik$"; then
+        item_falha "O componente de HTTPS não está instalado neste servidor."
+        echo ""
+        read -rp " Pressione ENTER para voltar..."
+        return 1
+    fi
+
+    echo -e "$bege A Let's Encrypt limita o número de tentativas por domínio. Só use$reset"
+    echo -e "$bege esta opção depois de confirmar que o DNS já aponta para cá.$reset"
+    echo ""
+
+    executar_passo "Reiniciando o componente de HTTPS" \
+        docker service update --force traefik_traefik || return 1
+    executar_passo "Aguardando o componente subir" wait_stack traefik || return 1
+
+    if [ -n "$url_fzap" ] && certificado_valido "$url_fzap"; then
+        item_ok "Certificado válido para $url_fzap"
+    else
+        item_atencao "O certificado ainda não está válido. Aguarde alguns minutos."
+    fi
+    echo ""
+    read -rp " Pressione ENTER para voltar..."
+}
+
+## Reinicia apenas o painel técnico. Não reaproveita reiniciar_portainer porque
+## aquela função termina perguntando se o usuário quer instalar outra
+## ferramenta, o que não faz sentido dentro do menu de manutenção.
+reiniciar_painel() {
+    clear
+    echo ""
+    echo -e "$branco Reiniciar o painel técnico$reset"
+    linha_fina
+    echo ""
+
+    if ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^portainer_portainer$"; then
+        item_falha "O painel técnico não está instalado neste servidor."
+        echo ""
+        read -rp " Pressione ENTER para voltar..."
+        return 1
+    fi
+
+    passo_atual=0
+    passos_total=2
+    executar_passo "Reiniciando o painel técnico" \
+        docker service update --force portainer_portainer || return 1
+    executar_passo "Aguardando o painel subir" wait_stack portainer || return 1
+
+    echo ""
+    read -rp " Pressione ENTER para voltar..."
+}
+
+menu_manutencao() {
+    local escolha
+
+    while true; do
+        clear
+        echo ""
+        echo -e "$branco Manutenção$reset"
+        linha_fina
+        echo ""
+        echo -e " $amarelo[1]$reset Ver as credenciais de acesso"
+        echo -e " $amarelo[2]$reset Emitir o certificado HTTPS novamente"
+        echo -e " $amarelo[3]$reset Reiniciar o painel técnico"
+        echo -e " $amarelo[4]$reset Salvar diagnóstico para o suporte"
+        echo -e " $amarelo[5]$reset Ver o log técnico"
+        echo -e " $amarelo[0]$reset Voltar"
+        echo ""
+        read -rp " Escolha: " escolha
+
+        case "$escolha" in
+            1)
+                clear
+                echo ""
+                mostrar_credenciais_painel
+                aviso_segredos_na_tela
+                read -rp " Pressione ENTER para voltar..."
+                ;;
+            2) reemitir_certificado ;;
+            3) reiniciar_painel ;;
+            4) salvar_diagnostico ;;
+            5) mostrar_motivo_tecnico ;;
+            0) return 0 ;;
+            *) ;;
+        esac
+    done
+}
+
+## Tela mostrada quando o FZAP já está instalado. Reexecutar o instalador é uma
+## situação normal, não um erro.
+tela_ja_instalado() {
+    local escolha
+    local estado_texto
+
+    while true; do
+        clear
+        echo ""
+        echo -e "$branco O FZAP já está instalado neste servidor$reset"
+        linha_fina
+        echo ""
+
+        url_fzap=$(estado_ler "Dominio fzap")
+        [ -n "$url_fzap" ] || url_fzap="(endereço não registrado)"
+
+        if stack_saudavel "fzap"; then
+            estado_texto="online"
+        else
+            estado_texto="fora do ar"
+        fi
+
+        echo -e " Endereço  ${branco}https://${url_fzap}${reset}"
+        echo -e " Status    ${estado_texto}"
+        echo ""
+
+        linha_fina
+        echo -e " $amarelo[1]$reset Verificar a instalação"
+        echo -e " $amarelo[2]$reset Abrir opções de manutenção"
+        echo -e " $amarelo[0]$reset Voltar"
+        echo ""
+        read -rp " Escolha: " escolha
+
+        case "$escolha" in
+            1)
+                estado_restaurar_dados
+                etapa5_verificar
+                read -rp " Pressione ENTER para voltar..."
+                ;;
+            2) menu_manutencao ;;
+            0) return 0 ;;
+            *) ;;
+        esac
+    done
+}
+
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+## JORNADA PRINCIPAL
+## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
+
+## Oferece retomada quando a execução anterior parou no meio.
+tela_retomar() {
+    local escolha
+    local etapa
+
+    etapa=$(estado_ler "Etapa concluida")
+    [ -n "$etapa" ] || return 0
+    [ "$(estado_ler "Situacao")" = "em_andamento" ] || return 0
+
+    clear
+    echo ""
+    echo -e "$branco Encontramos uma instalação interrompida$reset"
+    linha_fina
+    echo ""
+    case "$etapa" in
+        verificado_servidor) echo -e " Ela parou depois de verificar o servidor." ;;
+        dns_ok)              echo -e " Ela parou depois de configurar os endereços." ;;
+        dados_confirmados)   echo -e " Ela parou antes de preparar o servidor." ;;
+        infra_pronta)        echo -e " Ela parou depois de preparar o servidor." ;;
+        postgres_saudavel)   echo -e " Ela parou depois de iniciar o banco de dados." ;;
+        fzap_saudavel)       echo -e " Ela parou antes da verificação final." ;;
+        *)                   echo -e " Ela parou na etapa \"$etapa\"." ;;
+    esac
+    echo ""
+    echo -e "$bege Nada foi apagado. Retomar reaproveita o que já está pronto.$reset"
+    echo ""
+
+    linha_fina
+    echo -e " $amarelo[1]$reset Continuar de onde parou — recomendado"
+    echo -e " $amarelo[2]$reset Começar a verificação novamente"
+    echo -e " $amarelo[3]$reset Abrir opções de manutenção"
+    echo -e " $amarelo[0]$reset Voltar"
+    echo ""
+    read -rp " Escolha: " escolha
+
+    case "$escolha" in
+        1) estado_restaurar_dados; retomando=true; return 0 ;;
+        2) estado_limpar; return 0 ;;
+        3) menu_manutencao; return 1 ;;
+        0) return 1 ;;
+        *) return 1 ;;
+    esac
+}
+
+## Menu de falha compartilhado pelas duas situações em que a instalação não
+## chega ao fim. Devolve 0 quando o usuário quer tentar novamente.
+tratar_falha() {
+    estado_gravar "$(estado_ler "Etapa concluida")" "falhou"
+
+    while true; do
+        tela_falha_instalacao
+        case "$escolha_falha" in
+            1) return 0 ;;
+            2) mostrar_motivo_tecnico ;;
+            3) salvar_diagnostico ;;
+            0|*) return 1 ;;
+        esac
+    done
+}
+
+jornada_instalar_fzap() {
+    local resultado
+    local escolha
+
+    dominio_base=""
+    url_fzap=""
+    url_portainer=""
+    email_ssl=""
+    fzap_language=""
+    licence_key=""
+    senha_postgres=""
+    admin_token=""
+    retomando=false
+
+    dados
+    [ -n "$nome_rede_interna" ] || nome_rede_interna="$rede_padrao"
+    validar_rede_docker "$nome_rede_interna" >/dev/null 2>&1 || nome_rede_interna="$rede_padrao"
+
+    rotacionar_log
+    log_tecnico "instalador $versao iniciado (verbose=$modo_verbose)"
+
+    ## Uma instalação concluída não é tratada como erro.
+    if [ "$(estado_ler "Situacao")" = "concluido" ] || stack_saudavel "fzap"; then
+        tela_ja_instalado
+        return 0
+    fi
+
+    tela_retomar || return 0
+
+    if [ "$retomando" != true ]; then
+        etapa1_verificar_servidor || return 0
+        etapa2_enderecos || return 0
+        etapa3_configurar || return 0
+    else
+        ## Na retomada, revalida o que depende do mundo externo e mantém o resto.
+        estado_alcancou "dns_ok" || { etapa2_enderecos || return 0; }
+        estado_alcancou "dados_confirmados" || { etapa3_configurar || return 0; }
+        [ -n "$email_ssl" ] || { titulo_etapa 3 "Configurar o FZAP"; perguntar_email; }
+        [ -n "$fzap_language" ] || fzap_language="pt-BR"
+    fi
+
+    ## Instalar e verificar ficam no mesmo laço: "tentar novamente" repete o
+    ## trabalho sem pedir nenhum dado de novo, porque as respostas continuam em
+    ## memória e cada etapa é idempotente.
+    while true; do
+        if ! etapa4_instalar; then
+            tratar_falha && continue
+            return 0
+        fi
+
+        etapa5_verificar
+        resultado=$?
+
+        if [ "$resultado" -eq 0 ]; then
+            estado_gravar "concluido" "concluido"
+            tela_conclusao_sucesso
+            return 0
+        fi
+
+        if [ "$resultado" -eq 2 ]; then
+            tratar_falha && continue
+            return 0
+        fi
+
+        ## Serviços no ar, endereço ainda não disponível.
+        estado_gravar "fzap_saudavel" "concluido"
+        while true; do
+            tela_conclusao_parcial
+            read -rp " Escolha: " escolha
+            case "$escolha" in
+                1)
+                    if etapa5_verificar; then
+                        estado_gravar "concluido" "concluido"
+                        tela_conclusao_sucesso
+                        return 0
+                    fi
+                    read -rp " Pressione ENTER para voltar..."
+                    ;;
+                0|*) return 0 ;;
+            esac
+        done
+    done
+}
+
+## Cabeçalho curto do menu. A arte grande aparece apenas na abertura e na
+## conclusão, para não empurrar o conteúdo fora da tela a cada volta.
+menu_instalador() {
+    clear
+    echo ""
+    echo -e "$branco Flouds Installer$reset$bege   v$versao$reset"
+    linha_fina
+    echo ""
+    echo -e " $amarelo[1]$reset Instalar o FZAP neste servidor — recomendado"
+    echo -e " $amarelo[2]$reset Configurações avançadas"
+    echo -e " $amarelo[3]$reset Manutenção e diagnóstico"
+    echo ""
+    echo -e " $amarelo[0]$reset Sair"
     echo ""
 }
 
@@ -1759,16 +3390,13 @@ cd /root || exit 1
 ## Tela de boas-vindas
 nome_instalador
 
-echo -e "$amarelo====================================================================================================$reset"
-echo -e "$amarelo=                                                                                                  =$reset"
-echo -e "$amarelo=  $branco Este instalador foi desenvolvido pela equipe Flouds para facilitar a implantação         $amarelo=$reset"
-echo -e "$amarelo=  $branco da plataforma Fzap em servidores VPS com Docker Swarm.                                  $amarelo=$reset"
-echo -e "$amarelo=  $branco Estrutura inspirada no SetupOrion, projeto da comunidade OrionDesign.                   $amarelo=$reset"
-echo -e "$amarelo=                                                                                                  =$reset"
-echo -e "$amarelo====================================================================================================$reset"
+linha_fina
+echo -e "$branco Instale o FZAP e deixe-o acessível com HTTPS.$reset"
+echo -e "$bege O instalador prepara automaticamente tudo o que for necessário:$reset"
+echo -e "$bege endereços, certificado, banco de dados e painel técnico.$reset"
+linha_fina
 echo ""
-echo ""
-read -rp "Pressione ENTER para continuar..."
+read -rp " Pressione ENTER para continuar..."
 
 if [ "$modo_infra" = true ]; then
     ferramenta_traefik_e_portainer
@@ -1778,10 +3406,9 @@ fi
 ## Loop principal
 while true; do
 
-    nome_menu
     menu_instalador
 
-    if ! read -rp "Digite o número da opção desejada: " opcao; then
+    if ! read -rp " Escolha: " opcao; then
         echo ""
         echo -e "$vermelho Não foi possível ler a opção. Execute o instalador em um terminal interativo.$reset"
         exit 1
@@ -1789,15 +3416,17 @@ while true; do
 
     case $opcao in
 
-        1|traefik|portainer)
+        1|fzap|FZAP)
+            jornada_instalar_fzap
+            ;;
+
+        2|avancado|avançado|traefik|portainer)
             ferramenta_traefik_e_portainer
             ;;
 
-        2|fzap|FZAP)
-            verificar_stack "postgres" && continue || echo ""
-            verificar_stack "fzap" && continue || echo ""
-            verificar_docker_e_portainer_traefik || continue
-            ferramenta_fzap
+        3|manutencao|manutenção)
+            estado_restaurar_dados
+            menu_manutencao
             ;;
 
         0|sair|exit)
@@ -1808,12 +3437,8 @@ while true; do
             ;;
 
         *)
-            clear
-            erro_msg
-            echo ""
-            echo -e " Opção inválida. Digite 1, 2 ou 0."
-            echo ""
-            sleep 3
+            ## Uma opção digitada errado é recuperável: repete o menu na volta
+            ## seguinte, sem tela de erro e sem pausa fixa.
             ;;
     esac
 
