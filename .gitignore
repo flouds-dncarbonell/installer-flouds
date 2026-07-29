@@ -1,4 +1,7 @@
 biblioteca/
 .history/
 .claude/
+.openclaude/
+.codex/
+teste.md
 stack-fzap.md
