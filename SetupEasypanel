@@ -1,0 +1,46 @@
+#!/bin/bash
+
+set -euo pipefail
+
+gerador_url="${GENERATOR_URL:-https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/deploy/easypanel/generate-template.mjs}"
+arquivo_saida="${OUTPUT_FILE:-/tmp/fzap-easypanel.json}"
+arquivo_gerador=$(mktemp)
+
+umask 077
+
+limpar() {
+    rm -f "$arquivo_gerador"
+}
+trap limpar EXIT
+
+echo "Baixando o gerador seguro do template FZAP..."
+curl -fsSL "$gerador_url" -o "$arquivo_gerador"
+
+if command -v node >/dev/null 2>&1; then
+    node --input-type=module < "$arquivo_gerador" > "$arquivo_saida"
+elif command -v docker >/dev/null 2>&1; then
+    docker run --rm -i node:22-alpine node --input-type=module \
+        < "$arquivo_gerador" > "$arquivo_saida"
+else
+    echo "Erro: Node.js ou Docker é necessário para gerar o template." >&2
+    exit 1
+fi
+
+if [ ! -s "$arquivo_saida" ] || ! grep -q '"services"' "$arquivo_saida"; then
+    echo "Erro: o arquivo gerado não parece ser um template válido." >&2
+    exit 1
+fi
+
+chmod 600 "$arquivo_saida"
+
+echo ""
+echo "Template criado com sucesso em:"
+echo "  $arquivo_saida"
+echo ""
+echo "Próximo passo:"
+echo "1. Execute: cat $arquivo_saida"
+echo "2. Copie todo o JSON exibido."
+echo "3. No Easypanel, abra Templates e escolha Import JSON."
+echo "4. Cole o conteúdo e crie o projeto."
+echo ""
+echo "O arquivo contém credenciais exclusivas. Não publique nem versione."
