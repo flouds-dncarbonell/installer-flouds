@@ -10,7 +10,10 @@ Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desen
 - Acesso **root**
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
-- Dois endereços apontando para o IP do servidor: um para o **FZAP** e outro para o **painel técnico**
+- Um domínio próprio. O instalador pergunta apenas o domínio-base (por exemplo
+  `minhaempresa.com.br`) e sugere `fzap.` para o FZAP e `painel.` para o painel
+  técnico. Se o DNS ainda não estiver pronto, é possível instalar antes e criar
+  os registros depois.
 
 Na primeira instalação, o próprio instalador configura:
 
@@ -38,18 +41,39 @@ Execute o comando abaixo no terminal do servidor como **root**:
 curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup | sudo bash
 ```
 
-O script irá:
+No menu, escolha **Instalar FZAP neste servidor**. A instalação tem cinco
+etapas e pede apenas o domínio, o e-mail do certificado, o idioma e a licença:
 
-1. Detectar a distribuição e atualizar o índice de pacotes (`apt`, `dnf` ou `yum`)
-2. Instalar as dependências necessárias
-3. Instalar o **Docker** (caso não esteja presente)
-4. Inicializar o **Docker Swarm** (caso não esteja ativo)
-5. Preparar automaticamente o acesso HTTPS e o painel técnico
-6. Instalar o banco de dados e o FZAP
-7. Verificar se os serviços ficaram online
+1. **Verificar o servidor** — sistema, recursos, Docker, portas 80/443 e
+   instalação anterior
+2. **Endereços** — domínio-base, endereços sugeridos e conferência do DNS
+3. **Configurar o FZAP** — e-mail, idioma e licença, com confirmação final
+4. **Instalar** — HTTPS, painel técnico, banco de dados e FZAP
+5. **Verificar e concluir** — réplicas, certificado e endereço, antes de
+   declarar sucesso
 
-No menu, escolha **Instalar FZAP neste servidor**. As configurações de
-infraestrutura ficam disponíveis separadamente em **Configurações avançadas**.
+As configurações de infraestrutura ficam separadas em **Configurações
+avançadas**, e as ações de suporte em **Manutenção e diagnóstico**.
+
+#### Interrupções e reexecução
+
+O instalador grava o progresso em `/root/dados_vps/estado_instalacao` somente
+após verificar cada etapa. Ao ser executado de novo, ele oferece continuar de
+onde parou; nenhuma rede, volume, stack ou token válido é recriado. Se o FZAP já
+estiver instalado, a tela inicial mostra o endereço e o status em vez de um erro.
+
+#### Detalhes técnicos
+
+O caminho comum não mostra jargão. Os detalhes ficam em
+`/root/dados_vps/instalacao.log` (as cinco últimas execuções) e podem ser
+exibidos na tela com:
+
+```bash
+./SetupFlouds --verbose
+```
+
+Outras opções: `--infra-only` instala apenas Traefik e Portainer, e `NO_COLOR=1`
+desativa as cores sem perder nenhuma informação.
 
 ### Coolify
 
