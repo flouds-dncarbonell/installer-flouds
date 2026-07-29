@@ -1,0 +1,126 @@
+import {
+  Output,
+  randomPassword,
+  randomString,
+  Services,
+} from "~templates-utils";
+import { Input } from "./meta";
+
+export function generate(input: Input): Output {
+  const services: Services = [];
+  const databasePassword = randomPassword();
+  const adminToken = randomString(32);
+  const databaseServiceName = `${input.appServiceName}-db`;
+  const databaseHost = `$(PROJECT_NAME)_${databaseServiceName}`;
+
+  services.push({
+    type: "postgres",
+    data: {
+      serviceName: databaseServiceName,
+      password: databasePassword,
+      image: input.databaseServiceImage,
+    },
+  });
+
+  services.push({
+    type: "app",
+    data: {
+      serviceName: input.appServiceName,
+      source: {
+        type: "image",
+        image: input.appServiceImage,
+      },
+      domains: [
+        {
+          host: "$(EASYPANEL_DOMAIN)",
+          port: 8080,
+        },
+      ],
+      mounts: [
+        {
+          type: "volume",
+          name: "app-dbdata",
+          mountPath: "/app/dbdata",
+        },
+        {
+          type: "volume",
+          name: "files",
+          mountPath: "/app/files",
+        },
+        {
+          type: "volume",
+          name: "logos",
+          mountPath: "/app/data/public-folder-logos",
+        },
+      ],
+      deploy: {
+        replicas: 1,
+        zeroDowntime: false,
+      },
+      env: [
+        "TZ=America/Sao_Paulo",
+        `FZAP_LANGUAGE=${input.language}`,
+        "PUBLIC_BASE_URL=https://$(PRIMARY_DOMAIN)",
+        "LOG_LEVEL=info",
+        "LOG_CALLER=false",
+        "GLOBAL_PROXY_URL=",
+        "PASSKEY_EXTENSION_URL=",
+        `CHATWOOT_SYSTEM_IDENTIFIER=${input.chatwootIdentifier}`,
+        `CHATWOOT_SYSTEM_NAME=${input.chatwootSystemName}`,
+        `CHATWOOT_PLATFORM_NAME=${input.chatwootPlatformName}`,
+        `CHATWOOT_SERVICE_URL=${input.chatwootServiceUrl}`,
+        "CHATWOOT_GLOBAL_DB_HOST=",
+        "CHATWOOT_GLOBAL_DB_PORT=5432",
+        "CHATWOOT_GLOBAL_DB_NAME=",
+        "CHATWOOT_GLOBAL_DB_USER=",
+        "CHATWOOT_GLOBAL_DB_PASS=",
+        `ADMIN_TOKEN=${adminToken}`,
+        `FLOUDS_LICENCE_KEY=${input.licenceKey}`,
+        `FLOUDS_LIFETIME_LICENCE_KEY=${input.lifetimeLicenceKey}`,
+        "DB_DRIVER=postgres",
+        `DB_HOST=${databaseHost}`,
+        "DB_PORT=5432",
+        "DB_NAME=$(PROJECT_NAME)",
+        "DB_USER=postgres",
+        `DB_PASSWORD=${databasePassword}`,
+        `SESSION_DEVICE_NAME=${input.sessionDeviceName}`,
+        "WEBHOOK_FORMAT=json",
+        "IMAGE_QUALITY_HD=false",
+        "MAX_FILE_SIZE_MB=40",
+        "DOWNLOAD_TIMEOUT_SECONDS=120",
+        "MESSAGE_DELIVERY_TIMEOUT_SECONDS=30",
+        "GLOBAL_S3_BUCKET=",
+        "GLOBAL_S3_ACCESS_KEY=",
+        "GLOBAL_S3_SECRET_KEY=",
+        "GLOBAL_S3_ENDPOINT=",
+        "GLOBAL_S3_REGION=",
+        "GLOBAL_S3_PATH_STYLE=",
+        "GLOBAL_S3_PUBLIC_URL=",
+        "GLOBAL_S3_MEDIA_DELIVERY=both",
+        "GLOBAL_S3_RETENTION_DAYS=",
+        "TRANSCRIPTION_ENABLED=false",
+        "TRANSCRIPTION_PROVIDER=openai",
+        "TRANSCRIPTION_API_KEY=",
+        "TRANSCRIPTION_MODEL=",
+        "TRANSCRIPTION_BASE_URL=",
+        "META_APP_ID=",
+        "META_APP_SECRET=",
+        "META_CONFIG_ID=",
+        "RABBITMQ_ENABLED=false",
+        "RABBITMQ_URL=",
+        "RABBITMQ_EXCHANGE=fzap_events",
+        "RABBITMQ_PREFIX=fzap",
+        "RABBITMQ_FRAME_MAX=131072",
+        "RABBITMQ_HEARTBEAT=30",
+        "RABBITMQ_MAX_RECONNECT=10",
+        "RABBITMQ_RECONNECT_DELAY=5",
+        "RABBITMQ_MAX_DELIVERY_ATTEMPTS=5",
+        "RABBITMQ_DLQ_TTL_HOURS=168",
+        "RABBITMQ_DLQ_MAX_LENGTH=10000",
+        "SENTRY_DSN=",
+      ].join("\n"),
+    },
+  });
+
+  return { services };
+}
