@@ -40,13 +40,79 @@ detectar_sistema() {
     echo -e "$verde  ✔ Sistema detectado: ${PRETTY_NAME:-$ID}$reset"
 }
 
+## VPS recém-criada normalmente está rodando unattended-upgrades/cloud-init,
+## que seguram o lock do dpkg por alguns minutos. Espera em vez de falhar.
+apt_lock_ocupado() {
+    local arquivo
+    command -v fuser >/dev/null 2>&1 || return 1
+    for arquivo in /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock \
+                   /var/lib/apt/lists/lock /var/cache/apt/archives/lock; do
+        [ -e "$arquivo" ] || continue
+        fuser "$arquivo" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+aguardar_apt_lock() {
+    local limite=${1:-600} esperado=0 avisou=0
+
+    while apt_lock_ocupado; do
+        if [ "$avisou" -eq 0 ]; then
+            echo -e "$amarelo  O sistema está aplicando atualizações automáticas.$reset"
+            echo -e "$amarelo  Aguardando a liberação do apt, isso pode levar alguns minutos...$reset"
+            avisou=1
+        fi
+
+        if [ "$esperado" -ge "$limite" ]; then
+            falhar "O apt segue bloqueado após ${limite}s. Aguarde o fim das atualizações automáticas do sistema e execute o instalador novamente."
+        fi
+
+        sleep 5
+        esperado=$((esperado + 5))
+    done
+
+    [ "$avisou" -eq 1 ] && echo -e "$verde  ✔ apt liberado$reset"
+    return 0
+}
+
+## Roda apt-get tolerando lock ocupado; erros reais aparecem na tela.
+apt_get() {
+    local tentativa=1 max=10 saida
+
+    while :; do
+        aguardar_apt_lock
+
+        if saida="$(apt-get -o DPkg::Lock::Timeout=60 -y "$@" 2>&1)"; then
+            return 0
+        fi
+
+        if grep -qiE 'dpkg (was|foi) interrup|dpkg --configure -a' <<<"$saida"; then
+            dpkg --configure -a >/dev/null 2>&1 || true
+            continue
+        fi
+
+        if ! grep -qiE 'could not get lock|unable to acquire|frontend lock|temporarily unavailable|recurso temporariamente' <<<"$saida"; then
+            printf '%s\n' "$saida" >&2
+            return 1
+        fi
+
+        if [ "$tentativa" -ge "$max" ]; then
+            printf '%s\n' "$saida" >&2
+            return 1
+        fi
+
+        tentativa=$((tentativa + 1))
+        sleep 5
+    done
+}
+
 instalar_dependencias() {
     echo -e "$amarelo[1/3]$reset Atualizando o índice de pacotes..."
     case "$gerenciador_pacotes" in
         apt)
             export DEBIAN_FRONTEND=noninteractive
-            apt-get update -y >/dev/null || falhar "Falha ao atualizar o índice do apt."
-            apt-get install -y "${pacotes[@]}" >/dev/null || falhar "Falha ao instalar as dependências."
+            apt_get update || falhar "Falha ao atualizar o índice do apt."
+            apt_get install "${pacotes[@]}" || falhar "Falha ao instalar as dependências."
             ;;
         dnf)
             dnf -y makecache >/dev/null || falhar "Falha ao atualizar o índice do dnf."
