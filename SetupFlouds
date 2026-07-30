@@ -1918,14 +1918,25 @@ ferramenta_traefik_e_portainer() {
 ## COLETA DE DADOS
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
+## Um read que falha significa entrada encerrada — terminal não interativo, ou
+## /dev/tty indisponível num curl|bash. Sem esta guarda, todo laço de pergunta
+## giraria para sempre consumindo CPU em vez de terminar com uma mensagem.
+ler_entrada() {
+    if ! read -r "$@"; then
+        echo ""
+        echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
+        exit 1
+    fi
+}
+
 perguntar_dominio_base() {
     local resposta
 
     while true; do
         echo -e "$branco Qual é o seu domínio?$reset"
-        echo -e "$bege Exemplo: minhaempresa.com.br$reset"
+        echo -e "$bege Exemplo: empresa.com.br$reset"
         echo ""
-        read -rp " > " resposta
+        ler_entrada -p " > " resposta
         echo ""
 
         resposta=$(normalizar_dominio "$resposta")
@@ -1952,7 +1963,7 @@ perguntar_idioma() {
     while true; do
         echo -e "$branco Idioma do FZAP$reset"
         echo -e "$bege Enter usa pt-BR. Outras opções: 2 = en-US, 3 = es-LATAM$reset"
-        read -rp " > " escolha
+        ler_entrada -p " > " escolha
 
         case "$escolha" in
             ""|1|pt-BR|pt-br) fzap_language="pt-BR"; break ;;
@@ -1969,8 +1980,8 @@ perguntar_idioma() {
 perguntar_email() {
     while true; do
         echo -e "$branco E-mail para avisos de vencimento do certificado$reset"
-        echo -e "$bege Exemplo: contato@${dominio_base:-suaempresa.com.br}$reset"
-        read -rp " > " email_ssl
+        echo -e "$bege Exemplo: contato@${dominio_base:-empresa.com.br}$reset"
+        ler_entrada -p " > " email_ssl
         validar_email "$email_ssl" && break
     done
     echo ""
@@ -1980,7 +1991,7 @@ perguntar_licenca() {
     while true; do
         echo -e "$branco Chave de licença Flouds$reset"
         echo -e "$bege Enter usa a versão gratuita.$reset"
-        read -rp " > " licence_key
+        ler_entrada -p " > " licence_key
         validar_texto_livre "$licence_key" 512 && break
     done
     echo ""
@@ -2001,7 +2012,7 @@ perguntar_chatwoot() {
 
     while true; do
         echo -en "$amarelo Identificador do contato de onboarding: $reset"
-        read -r chatwoot_identifier
+        ler_entrada chatwoot_identifier
         [ -z "$chatwoot_identifier" ] && break
         chatwoot_identifier=$(normalizar_dominio "$chatwoot_identifier")
         validar_dominio "$chatwoot_identifier" && break
@@ -2009,19 +2020,19 @@ perguntar_chatwoot() {
 
     while true; do
         echo -en "$amarelo Nome exibido no onboarding: $reset"
-        read -r chatwoot_system_name
+        ler_entrada chatwoot_system_name
         validar_texto_livre "$chatwoot_system_name" 100 && break
     done
 
     while true; do
         echo -en "$amarelo Nome da plataforma Chatwoot: $reset"
-        read -r chatwoot_platform_name
+        ler_entrada chatwoot_platform_name
         validar_texto_livre "$chatwoot_platform_name" 100 && break
     done
 
     while true; do
         echo -en "$amarelo URL do Chatwoot (https://...): $reset"
-        read -r chatwoot_service_url
+        ler_entrada chatwoot_service_url
         validar_url_https_opcional "$chatwoot_service_url" && break
     done
     echo ""
@@ -2412,7 +2423,7 @@ etapa1_verificar_servidor() {
 
         if [ "$atencao" = false ]; then
             linha_fina
-            read -rp " Pressione ENTER para continuar, ou 0 para sair: " escolha
+            ler_entrada -p " Pressione ENTER para continuar, ou 0 para sair: " escolha
             [ "$escolha" = "0" ] && return 1
             estado_gravar "verificado_servidor"
             return 0
@@ -2445,7 +2456,7 @@ etapa1_verificar_servidor() {
         echo -e " $amarelo[2]$reset Continuar mesmo assim"
         echo -e " $amarelo[0]$reset Sair"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
         case "$escolha" in
             1) ;;
             2) estado_gravar "verificado_servidor"; return 0 ;;
@@ -2481,7 +2492,7 @@ derivar_enderecos() {
 
 ## Endereços informados um a um. É o caminho de quem já tem os subdomínios
 ## apontados e não segue a convenção fzap./painel., por exemplo
-## f.teste.exemplo.com.br. Aqui não existe domínio-base: tentar deduzi-lo a
+## app.empresa.com.br. Aqui não existe domínio-base: tentar deduzi-lo a
 ## partir do host erraria com sufixos como com.br.
 perguntar_enderecos_explicitos() {
     local painel_existente=""
@@ -2491,8 +2502,8 @@ perguntar_enderecos_explicitos() {
 
     while true; do
         echo -e "$branco Endereço do FZAP$reset"
-        echo -e "$bege Exemplo: f.teste.minhaempresa.com.br$reset"
-        read -rp " > " resposta
+        echo -e "$bege Exemplo: fzap.empresa.com.br$reset"
+        ler_entrada -p " > " resposta
         resposta=$(normalizar_dominio "$resposta")
         if eh_dominio_valido "$resposta"; then
             url_fzap="$resposta"
@@ -2519,8 +2530,8 @@ perguntar_enderecos_explicitos() {
     painel_reaproveitado=false
     while true; do
         echo -e "$branco Endereço do painel técnico$reset"
-        echo -e "$bege Exemplo: p.teste.minhaempresa.com.br$reset"
-        read -rp " > " resposta
+        echo -e "$bege Exemplo: painel.empresa.com.br$reset"
+        ler_entrada -p " > " resposta
         resposta=$(normalizar_dominio "$resposta")
         if ! eh_dominio_valido "$resposta"; then
             item_falha "Endereço inválido. Informe apenas o host, sem http:// e sem barras."
@@ -2551,7 +2562,7 @@ escolher_modo_enderecos() {
         echo ""
         echo -e " $amarelo[0]$reset Sair"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
         echo ""
 
         case "$escolha" in
@@ -2612,7 +2623,7 @@ etapa2_enderecos() {
         if [ "$resultado_fzap" -eq 0 ] && [ "$resultado_painel" -eq 0 ]; then
             estado_gravar "dns_ok"
             linha_fina
-            read -rp " Pressione ENTER para continuar: " escolha
+            ler_entrada -p " Pressione ENTER para continuar: " escolha
             return 0
         fi
 
@@ -2630,7 +2641,7 @@ etapa2_enderecos() {
         echo -e " $amarelo[3]$reset Alterar os endereços"
         echo -e " $amarelo[0]$reset Sair"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
 
         case "$escolha" in
             1) ;;
@@ -2686,7 +2697,7 @@ etapa3_configurar() {
         echo -e " $amarelo[2]$reset Corrigir alguma informação"
         echo -e " $amarelo[0]$reset Cancelar"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
 
         case "$escolha" in
             1)
@@ -2700,7 +2711,7 @@ etapa3_configurar() {
                 echo -e " $amarelo[3]$reset Idioma"
                 echo -e " $amarelo[4]$reset Licença"
                 echo ""
-                read -rp " Escolha: " escolha
+                ler_entrada -p " Escolha: " escolha
                 case "$escolha" in
                     1) etapa2_enderecos true || return 1 ;;
                     2) titulo_etapa 3 "Configurar o FZAP"; perguntar_email ;;
@@ -2891,7 +2902,7 @@ etapa4_instalar() {
         echo -e "$bege Abra as configurações avançadas e escolha reaproveitar a$reset"
         echo -e "$bege infraestrutura para registrar os dados de acesso.$reset"
         echo ""
-        read -rp " Pressione ENTER para voltar ao menu..."
+        ler_entrada -p " Pressione ENTER para voltar ao menu..."
         return 1
     fi
     [ "$resultado" -eq 0 ] || return 1
@@ -3041,7 +3052,7 @@ tela_conclusao_sucesso() {
     echo ""
     mostrar_credenciais_painel
     aviso_segredos_na_tela
-    read -rp " Pressione ENTER para finalizar..."
+    ler_entrada -p " Pressione ENTER para finalizar..."
 }
 
 ## Instalado, mas o resultado essencial ainda não está disponível. Não é
@@ -3108,7 +3119,7 @@ tela_falha_instalacao() {
     echo -e " $amarelo[3]$reset Salvar diagnóstico para o suporte"
     echo -e " $amarelo[0]$reset Sair"
     echo ""
-    read -rp " Escolha: " escolha_falha
+    ler_entrada -p " Escolha: " escolha_falha
 }
 
 mostrar_motivo_tecnico() {
@@ -3121,7 +3132,7 @@ mostrar_motivo_tecnico() {
     echo ""
     echo -e "$bege Log completo em $log_file$reset"
     echo ""
-    read -rp " Pressione ENTER para voltar..."
+    ler_entrada -p " Pressione ENTER para voltar..."
 }
 
 ## Coleta estado dos serviços para o suporte. Não inclui variáveis de ambiente
@@ -3160,7 +3171,7 @@ salvar_diagnostico() {
     echo -e "$bege O arquivo contém o estado dos serviços e o log do instalador.$reset"
     echo -e "$bege Ele não contém senhas nem tokens.$reset"
     echo ""
-    read -rp " Pressione ENTER para voltar..."
+    ler_entrada -p " Pressione ENTER para voltar..."
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
@@ -3180,7 +3191,7 @@ reemitir_certificado() {
     if ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^traefik_traefik$"; then
         item_falha "O componente de HTTPS não está instalado neste servidor."
         echo ""
-        read -rp " Pressione ENTER para voltar..."
+        ler_entrada -p " Pressione ENTER para voltar..."
         return 1
     fi
 
@@ -3198,7 +3209,7 @@ reemitir_certificado() {
         item_atencao "O certificado ainda não está válido. Aguarde alguns minutos."
     fi
     echo ""
-    read -rp " Pressione ENTER para voltar..."
+    ler_entrada -p " Pressione ENTER para voltar..."
 }
 
 ## Reinicia apenas o painel técnico. Não reaproveita reiniciar_portainer porque
@@ -3214,7 +3225,7 @@ reiniciar_painel() {
     if ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^portainer_portainer$"; then
         item_falha "O painel técnico não está instalado neste servidor."
         echo ""
-        read -rp " Pressione ENTER para voltar..."
+        ler_entrada -p " Pressione ENTER para voltar..."
         return 1
     fi
 
@@ -3225,7 +3236,7 @@ reiniciar_painel() {
     executar_passo "Aguardando o painel subir" wait_stack portainer || return 1
 
     echo ""
-    read -rp " Pressione ENTER para voltar..."
+    ler_entrada -p " Pressione ENTER para voltar..."
 }
 
 menu_manutencao() {
@@ -3244,7 +3255,7 @@ menu_manutencao() {
         echo -e " $amarelo[5]$reset Ver o log técnico"
         echo -e " $amarelo[0]$reset Voltar"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
 
         case "$escolha" in
             1)
@@ -3252,7 +3263,7 @@ menu_manutencao() {
                 echo ""
                 mostrar_credenciais_painel
                 aviso_segredos_na_tela
-                read -rp " Pressione ENTER para voltar..."
+                ler_entrada -p " Pressione ENTER para voltar..."
                 ;;
             2) reemitir_certificado ;;
             3) reiniciar_painel ;;
@@ -3295,13 +3306,13 @@ tela_ja_instalado() {
         echo -e " $amarelo[2]$reset Abrir opções de manutenção"
         echo -e " $amarelo[0]$reset Voltar"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
 
         case "$escolha" in
             1)
                 estado_restaurar_dados
                 etapa5_verificar
-                read -rp " Pressione ENTER para voltar..."
+                ler_entrada -p " Pressione ENTER para voltar..."
                 ;;
             2) menu_manutencao ;;
             0) return 0 ;;
@@ -3347,7 +3358,7 @@ tela_retomar() {
     echo -e " $amarelo[3]$reset Abrir opções de manutenção"
     echo -e " $amarelo[0]$reset Voltar"
     echo ""
-    read -rp " Escolha: " escolha
+    ler_entrada -p " Escolha: " escolha
 
     case "$escolha" in
         1) estado_restaurar_dados; retomando=true; return 0 ;;
@@ -3442,7 +3453,7 @@ jornada_instalar_fzap() {
         estado_gravar "fzap_saudavel" "concluido"
         while true; do
             tela_conclusao_parcial
-            read -rp " Escolha: " escolha
+            ler_entrada -p " Escolha: " escolha
             case "$escolha" in
                 1)
                     if etapa5_verificar; then
@@ -3450,7 +3461,7 @@ jornada_instalar_fzap() {
                         tela_conclusao_sucesso
                         return 0
                     fi
-                    read -rp " Pressione ENTER para voltar..."
+                    ler_entrada -p " Pressione ENTER para voltar..."
                     ;;
                 0|*) return 0 ;;
             esac
@@ -3495,7 +3506,7 @@ echo -e "$bege O instalador prepara automaticamente tudo o que for necessário:$
 echo -e "$bege endereços, certificado, banco de dados e painel técnico.$reset"
 linha_fina
 echo ""
-read -rp " Pressione ENTER para continuar..."
+ler_entrada -p " Pressione ENTER para continuar..."
 
 if [ "$modo_infra" = true ]; then
     ferramenta_traefik_e_portainer

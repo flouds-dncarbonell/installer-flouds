@@ -11,9 +11,9 @@ Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desen
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
 - Um domínio próprio. Na etapa de endereços o instalador oferece dois caminhos:
-  informar apenas o domínio-base (por exemplo `minhaempresa.com.br`) e aceitar
+  informar apenas o domínio-base (por exemplo `empresa.com.br`) e aceitar
   as sugestões `fzap.` e `painel.`, ou informar endereços já apontados para o
-  servidor, com qualquer nome (por exemplo `f.teste.minhaempresa.com.br`). Se o
+  servidor, com qualquer nome (por exemplo `app.empresa.com.br`). Se o
   DNS ainda não estiver pronto, é possível instalar antes e criar os registros
   depois.
 
