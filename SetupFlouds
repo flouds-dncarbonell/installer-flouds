@@ -655,13 +655,22 @@ mostrar_registro_dns() {
     local nome
 
     ip_vps=$(ip_publico)
-    nome="${host%".$base"}"
-    [ "$nome" = "$host" ] && nome="@"
 
-    echo -e "$bege   Crie este registro no painel do seu provedor de domínio:$reset"
-    echo ""
-    printf '     %-6s %-10s %s\n' "Tipo" "Nome" "Valor"
-    printf '     %-6s %-10s %s\n' "A" "$nome" "${ip_vps:-<IP desta VPS>}"
+    ## O formato de tabela só é possível quando conhecemos o domínio-base. Sem
+    ## ele, deduzir o nome do registro erraria com sufixos como com.br, então o
+    ## host completo é mostrado como está.
+    if [ -n "$base" ] && [ "$host" != "${host%".$base"}" ]; then
+        nome="${host%".$base"}"
+        echo -e "$bege   Crie este registro no painel do seu provedor de domínio:$reset"
+        echo ""
+        printf '     %-6s %-10s %s\n' "Tipo" "Nome" "Valor"
+        printf '     %-6s %-10s %s\n' "A" "$nome" "${ip_vps:-<IP desta VPS>}"
+        echo ""
+        return 0
+    fi
+
+    echo -e "$bege   No painel do seu provedor de domínio, crie um registro A para$reset"
+    echo -e "$bege   ${host} apontando para ${ip_vps:-o IP desta VPS}.$reset"
     echo ""
 }
 
@@ -2470,19 +2479,109 @@ derivar_enderecos() {
     fi
 }
 
+## Endereços informados um a um. É o caminho de quem já tem os subdomínios
+## apontados e não segue a convenção fzap./painel., por exemplo
+## f.teste.exemplo.com.br. Aqui não existe domínio-base: tentar deduzi-lo a
+## partir do host erraria com sufixos como com.br.
+perguntar_enderecos_explicitos() {
+    local painel_existente=""
+    local resposta
+
+    dominio_base=""
+
+    while true; do
+        echo -e "$branco Endereço do FZAP$reset"
+        echo -e "$bege Exemplo: f.teste.minhaempresa.com.br$reset"
+        read -rp " > " resposta
+        resposta=$(normalizar_dominio "$resposta")
+        if eh_dominio_valido "$resposta"; then
+            url_fzap="$resposta"
+            break
+        fi
+        item_falha "Endereço inválido. Informe apenas o host, sem http:// e sem barras."
+    done
+    echo ""
+
+    if [ -f "$dados_portainer_file" ]; then
+        painel_existente=$(ler_campo_arquivo "$dados_portainer_file" "Dominio do portainer: ")
+    fi
+
+    ## O endereço de um painel já instalado não é perguntado: mudá-lo exigiria
+    ## reinstalar o painel, o que não faz parte da jornada principal.
+    if [ -n "$painel_existente" ] && eh_dominio_valido "$painel_existente"; then
+        url_portainer="$painel_existente"
+        painel_reaproveitado=true
+        item_ok "Painel técnico já instalado em $url_portainer"
+        echo ""
+        return 0
+    fi
+
+    painel_reaproveitado=false
+    while true; do
+        echo -e "$branco Endereço do painel técnico$reset"
+        echo -e "$bege Exemplo: p.teste.minhaempresa.com.br$reset"
+        read -rp " > " resposta
+        resposta=$(normalizar_dominio "$resposta")
+        if ! eh_dominio_valido "$resposta"; then
+            item_falha "Endereço inválido. Informe apenas o host, sem http:// e sem barras."
+            continue
+        fi
+        if [ "$resposta" = "$url_fzap" ]; then
+            item_falha "O painel técnico precisa de um endereço diferente do FZAP."
+            continue
+        fi
+        url_portainer="$resposta"
+        break
+    done
+    echo ""
+}
+
+## Quem tem um domínio livre aceita as sugestões; quem já apontou subdomínios
+## informa cada endereço.
+escolher_modo_enderecos() {
+    local escolha
+
+    while true; do
+        echo -e "$branco Como você quer definir os endereços?$reset"
+        echo ""
+        echo -e " $amarelo[1]$reset Tenho um domínio e quero as sugestões — recomendado"
+        echo -e "$bege     O instalador usa fzap. para o FZAP e painel. para o painel.$reset"
+        echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
+        echo -e "$bege     Você informa cada endereço, com o nome que quiser.$reset"
+        echo ""
+        echo -e " $amarelo[0]$reset Sair"
+        echo ""
+        read -rp " Escolha: " escolha
+        echo ""
+
+        case "$escolha" in
+            ""|1)
+                perguntar_dominio_base || return 1
+                derivar_enderecos
+                return 0
+                ;;
+            2)
+                perguntar_enderecos_explicitos
+                return 0
+                ;;
+            0) return 1 ;;
+            *) titulo_etapa 2 "Endereços" ;;
+        esac
+    done
+}
+
 etapa2_enderecos() {
+    local forcar="${1:-false}"
     local escolha
     local resultado_fzap
     local resultado_painel
     local ip_vps
 
-    painel_reaproveitado=false
-
-    if [ -z "$dominio_base" ]; then
+    if [ "$forcar" = true ] || [ -z "$url_fzap" ]; then
+        painel_reaproveitado=false
         titulo_etapa 2 "Endereços"
-        perguntar_dominio_base || return 1
+        escolher_modo_enderecos || return 1
     fi
-    derivar_enderecos
 
     while true; do
         titulo_etapa 2 "Endereços"
@@ -2541,9 +2640,9 @@ etapa2_enderecos() {
                 return 0
                 ;;
             3)
+                painel_reaproveitado=false
                 titulo_etapa 2 "Endereços"
-                perguntar_dominio_base || return 1
-                derivar_enderecos
+                escolher_modo_enderecos || return 1
                 ;;
             0) return 1 ;;
             *) ;;
@@ -2603,7 +2702,7 @@ etapa3_configurar() {
                 echo ""
                 read -rp " Escolha: " escolha
                 case "$escolha" in
-                    1) etapa2_enderecos || return 1 ;;
+                    1) etapa2_enderecos true || return 1 ;;
                     2) titulo_etapa 3 "Configurar o FZAP"; perguntar_email ;;
                     3) titulo_etapa 3 "Configurar o FZAP"; perguntar_idioma ;;
                     4) titulo_etapa 3 "Configurar o FZAP"; perguntar_licenca; perguntar_chatwoot ;;

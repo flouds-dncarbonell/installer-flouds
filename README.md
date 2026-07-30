@@ -10,10 +10,12 @@ Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desen
 - Acesso **root**
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
-- Um domínio próprio. O instalador pergunta apenas o domínio-base (por exemplo
-  `minhaempresa.com.br`) e sugere `fzap.` para o FZAP e `painel.` para o painel
-  técnico. Se o DNS ainda não estiver pronto, é possível instalar antes e criar
-  os registros depois.
+- Um domínio próprio. Na etapa de endereços o instalador oferece dois caminhos:
+  informar apenas o domínio-base (por exemplo `minhaempresa.com.br`) e aceitar
+  as sugestões `fzap.` e `painel.`, ou informar endereços já apontados para o
+  servidor, com qualquer nome (por exemplo `f.teste.minhaempresa.com.br`). Se o
+  DNS ainda não estiver pronto, é possível instalar antes e criar os registros
+  depois.
 
 Na primeira instalação, o próprio instalador configura:
 
@@ -46,7 +48,8 @@ etapas e pede apenas o domínio, o e-mail do certificado, o idioma e a licença:
 
 1. **Verificar o servidor** — sistema, recursos, Docker, portas 80/443 e
    instalação anterior
-2. **Endereços** — domínio-base, endereços sugeridos e conferência do DNS
+2. **Endereços** — endereços sugeridos a partir do domínio-base ou informados
+   um a um, com conferência do DNS
 3. **Configurar o FZAP** — e-mail, idioma e licença, com confirmação final
 4. **Instalar** — HTTPS, painel técnico, banco de dados e FZAP
 5. **Verificar e concluir** — réplicas, certificado e endereço, antes de
