@@ -17,8 +17,8 @@ Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desen
   localmente, sem domínio nenhum. Se o DNS ainda não estiver pronto, é possível
   instalar antes e criar os registros depois.
 
-A instalação local dispensa o domínio, as portas 80/443 e o firewall: veja
-[Instalação local](#instalação-local).
+A instalação sem domínio dispensa as portas 80/443 e usa HTTP nas portas
+8080/9000: veja [Instalação sem domínio](#instalação-sem-domínio).
 
 Na primeira instalação, o próprio instalador configura:
 
@@ -52,7 +52,7 @@ etapas e pede apenas o domínio, o e-mail do certificado, o idioma e a licença:
 1. **Verificar o servidor** — sistema, recursos, Docker, portas 80/443 e
    instalação anterior
 2. **Endereços** — endereços sugeridos a partir do domínio-base, informados
-   um a um (com conferência do DNS), ou instalação local sem domínio
+   um a um (com conferência do DNS), ou instalação sem domínio
 3. **Configurar o FZAP** — e-mail, idioma e licença, com confirmação final
 4. **Instalar** — HTTPS, painel técnico, banco de dados e FZAP
 5. **Verificar e concluir** — réplicas, certificado e endereço, antes de
@@ -102,39 +102,42 @@ exibidos na tela com:
 ```
 
 Outras opções: `--infra-only` instala apenas Traefik e Portainer, `--local`
-instala em localhost (veja abaixo) e `NO_COLOR=1` desativa as cores sem perder
-nenhuma informação.
+instala sem domínio com detecção automática, `--ip` força o IP público e
+`NO_COLOR=1` desativa as cores sem perder nenhuma informação.
 
-#### Instalação local
+#### Instalação sem domínio
 
-Para testar o FZAP numa máquina que não tem domínio nem IP público — um
-notebook, uma VM de desenvolvimento, uma VPS atrás de NAT — escolha a opção
-**Instalar localmente, sem domínio** na etapa de endereços, ou execute o
+Para instalar o FZAP sem domínio, escolha a opção correspondente na etapa de
+endereços ou execute o
 instalador com `--local`:
 
 ```bash
 ./SetupFlouds --local
 ```
 
+Se a VPS recebe o IP público por NAT e for detectada como ambiente local, use
+`./SetupFlouds --ip` ou escolha **usar o IP público mesmo com NAT** no menu.
+
 Nesse modo o FZAP e o painel técnico publicam portas direto no host, sem
-Traefik e sem HTTPS:
+Traefik e sem HTTPS. Numa VPS com IP público diretamente atribuído, o
+instalador detecta o IP e o usa como endereço:
 
 | Serviço | Endereço |
 |---|---|
-| FZAP | `http://localhost:8080` |
-| Painel técnico (Portainer) | `http://localhost:9000` |
+| FZAP | `http://IP-DA-VPS:8080` |
+| Painel técnico (Portainer) | `http://IP-DA-VPS:9000` |
 
-O instalador pula a verificação de DNS, a emissão do certificado e a liberação
-de portas no firewall — o acesso é só a partir da própria máquina. A etapa 1
-verifica as portas **8080** e **9000** em vez de 80 e 443.
+O instalador pula a verificação de DNS e a emissão do certificado. Em uma VPS,
+ele libera as portas **8080** e **9000** no UFW quando este estiver ativo. Talvez
+também seja necessário liberar essas portas no firewall do provedor.
 
-Quando o ambiente parece local (WSL, ausência de IP público alcançável, ou IP
-privado atrás de NAT), o instalador detecta a situação e já recomenda esse modo
-na etapa de endereços. As três opções continuam disponíveis: a detecção só muda
-qual delas vem sugerida.
+Quando o ambiente parece local (WSL, ausência de IP público alcançável ou IP
+privado atrás de NAT), o endereço continua sendo `http://localhost:8080`, com o
+painel em `http://localhost:9000`.
 
-Uma instalação local **não é adequada para produção**: sem HTTPS, os webhooks
-do WhatsApp não conseguem alcançar o servidor de fora.
+Uma instalação sem domínio **não é recomendada para produção**. O tráfego e
+o painel ficam sem HTTPS, e integrações que exigem uma URL HTTPS podem não
+funcionar. Use senhas fortes e restrinja a porta 9000 no firewall do provedor.
 
 ### Coolify
 
@@ -192,12 +195,12 @@ O Fzap é uma aplicação que roda em container Docker e oferece:
 ## Stack
 
 A stack do Fzap usa Docker Swarm com Traefik para SSL automático — exceto na
-instalação local, que dispensa o Traefik e publica as portas direto no host. As
+instalação sem domínio, que dispensa o Traefik e publica as portas direto no host. As
 principais variáveis de ambiente configuradas durante a instalação:
 
 | Variável | Descrição |
 |---|---|
-| `PUBLIC_BASE_URL` | URL completa onde o Fzap está acessível (`http://localhost:8080` no modo local) |
+| `PUBLIC_BASE_URL` | URL completa onde o Fzap está acessível (`http://IP-DA-VPS:8080` sem domínio, ou localhost em ambiente local) |
 | `FZAP_LANGUAGE` | Idioma: `pt-BR`, `en-US`, `es-LATAM` |
 | `ADMIN_TOKEN` | Token de autenticação da API |
 | `FLOUDS_LICENCE_KEY` | Chave de licença (vazio = versão free) |

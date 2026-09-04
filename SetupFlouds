@@ -5,7 +5,7 @@
 ##     Estrutura inspirada no SetupOrion: https://github.com/oriondesign2015/SetupOrion
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-versao="1.4.1"
+versao="1.4.2"
 traefik_image="traefik:v3.6.17"
 portainer_image="portainer/portainer-ce:2.39.5"
 portainer_agent_image="portainer/agent:2.39.5"
@@ -13,9 +13,10 @@ rede_padrao="proxy"
 modo_infra=false
 modo_verbose=false
 
-## Instalação local: sem domínio, sem Traefik e sem HTTPS. O FZAP e o painel
-## publicam portas direto no host. Serve para testar numa máquina de trabalho.
+## Instalação sem domínio: sem Traefik e sem HTTPS. Numa VPS usa o IP público;
+## em máquinas locais usa localhost. O FZAP e o painel publicam portas no host.
 modo_local=false
+forcar_ip_publico=false
 porta_fzap_local=8080
 porta_painel_local=9000
 
@@ -27,10 +28,12 @@ for argumento in "$@"; do
         --infra-only) modo_infra=true ;;
         --verbose) modo_verbose=true ;;
         --local) modo_local=true ;;
+        --ip) modo_local=true; forcar_ip_publico=true ;;
         -h|--help)
-            echo "Uso: $0 [--infra-only] [--local] [--verbose]"
+            echo "Uso: $0 [--infra-only] [--local|--ip] [--verbose]"
             echo "  --infra-only  instala somente Traefik e Portainer"
-            echo "  --local       instala em localhost, sem domínio e sem HTTPS"
+            echo "  --local       instala sem domínio e sem HTTPS (IP público ou localhost)"
+            echo "  --ip          instala sem domínio e força o uso do IP público"
             echo "  --verbose     mostra os detalhes técnicos durante a instalação"
             exit 0
             ;;
@@ -624,11 +627,12 @@ recursos() {
     return 1
 }
 
-## Endereços exibidos e usados pelo instalador. Numa instalação local não há
-## domínio nem HTTPS: tudo passa por portas publicadas no próprio host.
+## Endereços exibidos e usados pelo instalador. Sem domínio nem HTTPS, tudo
+## passa por portas publicadas no host; url_fzap/url_portainer guardam o IP ou
+## localhost conforme o ambiente detectado.
 url_fzap_completa() {
     if [ "$modo_local" = true ]; then
-        echo "http://localhost:${porta_fzap_local}"
+        echo "http://${url_fzap:-localhost}:${porta_fzap_local}"
     else
         echo "https://${url_fzap}"
     fi
@@ -636,9 +640,19 @@ url_fzap_completa() {
 
 url_painel_completa() {
     if [ "$modo_local" = true ]; then
-        echo "http://localhost:${porta_painel_local}"
+        echo "http://${url_portainer:-localhost}:${porta_painel_local}"
     else
         echo "https://${1:-$url_portainer}"
+    fi
+}
+
+## A verificação roda dentro da VPS. Usar loopback evita falhas em provedores
+## que não permitem acessar o IP público da máquina a partir dela mesma.
+url_fzap_verificacao() {
+    if [ "$modo_local" = true ]; then
+        echo "http://127.0.0.1:${porta_fzap_local}"
+    else
+        url_fzap_completa
     fi
 }
 
@@ -721,14 +735,22 @@ mostrar_registro_dns() {
 }
 
 configurar_firewall_http_https() {
-    ## Numa instalação local o acesso vem da própria máquina: não há nada a
-    ## abrir no firewall, e abrir seria expor o painel sem HTTPS.
-    [ "$modo_local" = true ] && return 0
+    local portas="80 443"
+    local rotulo="80/443"
+
+    ## localhost continua restrito à máquina. Numa VPS sem domínio, libera as
+    ## portas publicadas para que o IP informado ao usuário realmente funcione.
+    if [ "$modo_local" = true ]; then
+        [ "${url_fzap:-localhost}" = "localhost" ] && return 0
+        portas="$porta_fzap_local $porta_painel_local"
+        rotulo="${porta_fzap_local}/${porta_painel_local}"
+    fi
 
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
-        echo -e "$amarelo• Liberando portas 80/443 no UFW...$reset"
-        ufw allow 80/tcp >/dev/null 2>&1
-        ufw allow 443/tcp >/dev/null 2>&1
+        echo -e "$amarelo• Liberando portas ${rotulo} no UFW...$reset"
+        for porta in $portas; do
+            ufw allow "${porta}/tcp" >/dev/null 2>&1
+        done
         echo -e "$verde  ✔ Firewall local OK$reset"
         echo ""
     fi
@@ -1527,6 +1549,65 @@ obter_token_api_portainer() {
     return 0
 }
 
+## Resolve o ambiente Docker (endpoint) usado nos deploys.
+## O Portainer cadastra o ambiente "primary" sozinho no primeiro boot, mas só
+## quando consegue falar com o agent a tempo. Numa VPS lenta o painel sobe com a
+## conta válida e nenhum ambiente cadastrado — e é essa infraestrutura que uma
+## reinstalação reaproveita. Por isso aqui aceitamos qualquer nome já existente
+## e, na falta de todos, cadastramos o ambiente nós mesmos.
+obter_endpoint_portainer() {
+    local endpoints
+    local resposta
+
+    endpoints=$(portainer_api -s -X GET \
+        -H "X-API-Key: $PORTAINER_API_KEY" \
+        "$(painel_api_base "$PORTAINER_URL")/api/endpoints" 2>/dev/null)
+
+    if ! echo "$endpoints" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        item_falha "Não foi possível falar com o painel técnico."
+        log_tecnico "resposta inesperada de /api/endpoints: $(echo "$endpoints" | head -c 200)"
+        return 1
+    fi
+
+    ENDPOINT_ID=$(echo "$endpoints" \
+        | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null | head -1)
+    if [ -n "$ENDPOINT_ID" ]; then
+        log_tecnico "endpoint primary=$ENDPOINT_ID"
+        return 0
+    fi
+
+    ## Instalações antigas, ou feitas à mão, podem ter batizado o ambiente de
+    ## outra forma. Qualquer um serve: este servidor tem um Docker só.
+    ENDPOINT_ID=$(echo "$endpoints" | jq -r '.[0].Id // empty' 2>/dev/null)
+    if [ -n "$ENDPOINT_ID" ]; then
+        log_tecnico "endpoint 'primary' ausente: usando $(echo "$endpoints" | jq -r '.[0].Name // "?"') (id=$ENDPOINT_ID)"
+        return 0
+    fi
+
+    log_tecnico "nenhum ambiente cadastrado no painel: criando 'primary' via agent"
+    resposta=$(portainer_api -s -X POST \
+        -H "X-API-Key: $PORTAINER_API_KEY" \
+        -F "Name=primary" \
+        -F "EndpointCreationType=2" \
+        -F "URL=tcp://tasks.agent:9001" \
+        -F "TLS=true" \
+        -F "TLSSkipVerify=true" \
+        -F "TLSSkipClientVerify=true" \
+        "$(painel_api_base "$PORTAINER_URL")/api/endpoints" 2>/dev/null)
+
+    ENDPOINT_ID=$(echo "$resposta" | jq -r '.Id // empty' 2>/dev/null)
+    if [ -n "$ENDPOINT_ID" ]; then
+        log_tecnico "endpoint primary criado (id=$ENDPOINT_ID)"
+        return 0
+    fi
+
+    item_falha "O painel técnico não tem acesso ao Docker deste servidor."
+    log_tecnico "falha ao criar endpoint primary: $(echo "$resposta" | head -c 200)"
+    echo -e "$bege    O agente do painel pode não ter subido. Verifique com:$reset"
+    echo -e "$amarelo    docker stack services portainer$reset"
+    return 1
+}
+
 ## Deploy da stack via API do Portainer
 ## Instala ou atualiza uma stack pela API do Portainer. Uma stack já existente é
 ## atualizada (PUT), nunca recriada: é isso que permite retomar uma instalação
@@ -1541,16 +1622,7 @@ deploy() {
 
     obter_token_api_portainer || return 1
 
-    ENDPOINT_ID=$(portainer_api -s -X GET \
-        -H "X-API-Key: $PORTAINER_API_KEY" \
-        "$(painel_api_base "$PORTAINER_URL")/api/endpoints" \
-        | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null)
-    if [ -z "$ENDPOINT_ID" ]; then
-        item_falha "Não foi possível falar com o painel técnico."
-        log_tecnico "endpoint 'primary' não encontrado na API do Portainer"
-        return 1
-    fi
-    log_tecnico "endpoint primary=$ENDPOINT_ID"
+    obter_endpoint_portainer || return 1
 
     SWARM_ID=$(portainer_api -s -X GET \
         -H "X-API-Key: $PORTAINER_API_KEY" \
@@ -2625,7 +2697,7 @@ etapa1_verificar_servidor() {
             item_pendente "$(rotulo_valor "Modo cluster" "será configurado")"
         fi
 
-        ## O modo local não usa Traefik: as portas que importam são as que o
+        ## O modo sem domínio não usa Traefik: importam as portas que o
         ## FZAP e o painel publicam direto no host.
         portas_ocupadas=$(portas_em_uso)
         if [ "$modo_local" = true ]; then
@@ -2643,7 +2715,7 @@ etapa1_verificar_servidor() {
         fi
 
         if [ "$modo_local" = true ]; then
-            item_pendente "$(rotulo_valor "Preparação do servidor" "modo local, sem HTTPS")"
+            item_pendente "$(rotulo_valor "Preparação do servidor" "sem domínio e sem HTTPS")"
         elif _tem_traefik && _tem_portainer; then
             item_ok "$(rotulo_valor "Preparação do servidor" "já feita")"
         elif _tem_traefik || _tem_portainer; then
@@ -2825,14 +2897,21 @@ parece_ambiente_local() {
     return 1
 }
 
-## Numa instalação local não há endereço a escolher nem DNS a verificar: os
-## valores existem apenas para nomear as stacks e o arquivo de credenciais.
+## Sem domínio não há DNS a verificar. Uma VPS diretamente acessível recebe o
+## IP público como URL; ambientes locais ou atrás de NAT continuam em localhost.
 configurar_enderecos_locais() {
+    local endereco="localhost"
+
+    if [ "$forcar_ip_publico" = true ] || ! parece_ambiente_local; then
+        endereco=$(ip_publico)
+        [ -n "$endereco" ] || endereco="localhost"
+    fi
+
     dominio_base=""
-    url_fzap="localhost"
-    url_portainer="localhost"
+    url_fzap="$endereco"
+    url_portainer="$endereco"
     painel_reaproveitado=false
-    log_tecnico "modo local ativado (fzap:${porta_fzap_local} painel:${porta_painel_local})"
+    log_tecnico "modo sem domínio ativado (host:${endereco} fzap:${porta_fzap_local} painel:${porta_painel_local})"
 }
 
 ## Quem tem um domínio livre aceita as sugestões; quem já apontou subdomínios
@@ -2840,8 +2919,10 @@ configurar_enderecos_locais() {
 escolher_modo_enderecos() {
     local escolha
     local local_provavel=false
+    local ip_detectado
 
     parece_ambiente_local && local_provavel=true
+    ip_detectado=$(ip_publico)
 
     while true; do
         echo -e "$branco Como você quer definir os endereços?$reset"
@@ -2856,13 +2937,17 @@ escolher_modo_enderecos() {
             echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
             echo -e " $amarelo[3]$reset Instalar localmente, sem domínio — recomendado"
             echo -e "$bege     Acesso por http://localhost:${porta_fzap_local}, sem HTTPS.$reset"
+            if [ -n "$ip_detectado" ]; then
+                echo -e " $amarelo[4]$reset Instalar sem domínio, usando o IP público"
+                echo -e "$bege     Tentar acesso por http://${ip_detectado}:${porta_fzap_local}, mesmo com NAT.$reset"
+            fi
         else
             echo -e " $amarelo[1]$reset Tenho um domínio e quero as sugestões — recomendado"
             echo -e "$bege     O instalador usa fzap. para o FZAP e painel. para o painel.$reset"
             echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
             echo -e "$bege     Você informa cada endereço, com o nome que quiser.$reset"
-            echo -e " $amarelo[3]$reset Instalar localmente, sem domínio"
-            echo -e "$bege     Acesso por http://localhost:${porta_fzap_local}, sem HTTPS. Para testes.$reset"
+            echo -e " $amarelo[3]$reset Instalar sem domínio, usando o IP público"
+            echo -e "$bege     Acesso por http://$(ip_publico):${porta_fzap_local}, sem HTTPS.$reset"
         fi
 
         echo ""
@@ -2879,17 +2964,27 @@ escolher_modo_enderecos() {
         case "$escolha" in
             ""|1)
                 modo_local=false
+                forcar_ip_publico=false
                 perguntar_dominio_base || return 1
                 derivar_enderecos
                 return 0
                 ;;
             2)
                 modo_local=false
+                forcar_ip_publico=false
                 perguntar_enderecos_explicitos
                 return 0
                 ;;
             3)
                 modo_local=true
+                forcar_ip_publico=false
+                configurar_enderecos_locais
+                return 0
+                ;;
+            4)
+                [ -n "$ip_detectado" ] || continue
+                modo_local=true
+                forcar_ip_publico=true
                 configurar_enderecos_locais
                 return 0
                 ;;
@@ -2917,14 +3012,18 @@ etapa2_enderecos() {
         fi
     fi
 
-    ## O modo local não depende de DNS: mostra o que será publicado e segue.
+    ## O modo sem domínio não depende de DNS: mostra o que será publicado e segue.
     if [ "$modo_local" = true ]; then
         titulo_etapa 2 "Endereços"
         item_ok "FZAP            $(url_fzap_completa)"
         item_ok "Painel técnico  $(url_painel_completa)"
         echo ""
-        echo -e "$bege Instalação local: sem domínio, sem HTTPS e sem certificado. O acesso$reset"
-        echo -e "$bege é só a partir deste computador.$reset"
+        echo -e "$bege Instalação sem domínio, HTTPS ou certificado.$reset"
+        if [ "$url_fzap" = "localhost" ]; then
+            echo -e "$bege O acesso fica restrito a este computador.$reset"
+        else
+            echo -e "$bege O acesso externo usa diretamente o IP público desta VPS.$reset"
+        fi
         echo ""
         estado_gravar "dns_ok"
         linha_fina
@@ -3026,8 +3125,8 @@ etapa3_configurar() {
         echo -e " Licença         $branco ${licence_key:+informada}${licence_key:-versão gratuita}$reset"
         echo ""
         if [ "$modo_local" = true ]; then
-            echo -e "$bege Instalação local: rede interna, banco de dados e painel técnico. Sem$reset"
-            echo -e "$bege HTTPS e sem acesso externo. A senha do painel e o token de$reset"
+            echo -e "$bege Instalação sem domínio: rede interna, banco de dados e painel técnico.$reset"
+            echo -e "$bege O acesso será por HTTP em $(url_fzap_completa). A senha do painel e o token de$reset"
             echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
         else
             echo -e "$bege O servidor será configurado automaticamente: HTTPS, rede interna,$reset"
@@ -3213,6 +3312,8 @@ preparar_infraestrutura() {
     if [ "$modo_local" != true ]; then
         executar_passo "Portas 80 e 443 liberadas" configurar_firewall_http_https || return 1
         executar_passo "Acesso HTTPS configurado" deploy_traefik || return 1
+    elif [ "${url_fzap:-localhost}" != "localhost" ]; then
+        executar_passo "Portas ${porta_fzap_local} e ${porta_painel_local} liberadas" configurar_firewall_http_https || return 1
     fi
     executar_passo "Painel técnico instalado" deploy_portainer || return 1
     executar_passo "Credenciais do painel salvas" salvar_dados_painel || return 1
@@ -3233,7 +3334,7 @@ etapa4_instalar() {
     if _infra_pronta; then
         passos_total=5
     elif [ "$modo_local" = true ]; then
-        passos_total=8
+        if [ "${url_fzap:-localhost}" = "localhost" ]; then passos_total=8; else passos_total=9; fi
     else
         passos_total=10
     fi
@@ -3343,10 +3444,10 @@ etapa5_verificar() {
     ## Sem HTTPS não há certificado a esperar: basta o endereço responder.
     if [ "$modo_local" = true ]; then
         for tentativa in 1 2 3 4 5 6; do
-            curl -fsS --max-time 10 -o /dev/null "$(url_fzap_completa)" 2>/dev/null && break
+            curl -fsS --max-time 10 -o /dev/null "$(url_fzap_verificacao)" 2>/dev/null && break
             sleep 5
         done
-        if curl -fsS --max-time 10 -o /dev/null "$(url_fzap_completa)" 2>/dev/null; then
+        if curl -fsS --max-time 10 -o /dev/null "$(url_fzap_verificacao)" 2>/dev/null; then
             item_ok "Endereço acessível"
             echo ""
             return 0
@@ -3430,7 +3531,7 @@ tela_conclusao_parcial() {
     echo -e "$amarelo FZAP instalado — aguardando o endereço$reset"
     linha_fina
     echo ""
-    ## Numa instalação local não há DNS: se o endereço não respondeu, o serviço
+    ## Numa instalação sem domínio não há DNS: se o endereço não respondeu, o serviço
     ## ainda está subindo, e é isso que precisa ser dito.
     if [ "$modo_local" = true ]; then
         echo -e " Os serviços estão rodando, mas o endereço ainda não respondeu."
@@ -3574,7 +3675,7 @@ reemitir_certificado() {
     echo ""
 
     if [ "$modo_local" = true ]; then
-        item_falha "Esta é uma instalação local: ela não usa HTTPS."
+        item_falha "Esta é uma instalação sem domínio: ela não usa HTTPS."
         echo ""
         ler_entrada -p " Pressione ENTER para voltar..."
         return 1
