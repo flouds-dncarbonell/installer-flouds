@@ -13,6 +13,12 @@ rede_padrao="proxy"
 modo_infra=false
 modo_verbose=false
 
+## Instalação local: sem domínio, sem Traefik e sem HTTPS. O FZAP e o painel
+## publicam portas direto no host. Serve para testar numa máquina de trabalho.
+modo_local=false
+porta_fzap_local=8080
+porta_painel_local=9000
+
 ## Dados de acesso, hashes e arquivos ACME criados pelo instalador ficam restritos ao root.
 umask 077
 
@@ -20,9 +26,11 @@ for argumento in "$@"; do
     case "$argumento" in
         --infra-only) modo_infra=true ;;
         --verbose) modo_verbose=true ;;
+        --local) modo_local=true ;;
         -h|--help)
-            echo "Uso: $0 [--infra-only] [--verbose]"
+            echo "Uso: $0 [--infra-only] [--local] [--verbose]"
             echo "  --infra-only  instala somente Traefik e Portainer"
+            echo "  --local       instala em localhost, sem domínio e sem HTTPS"
             echo "  --verbose     mostra os detalhes técnicos durante a instalação"
             exit 0
             ;;
@@ -255,6 +263,7 @@ estado_gravar() {
         echo "Email SSL: ${email_ssl:-}"
         echo "Idioma: ${fzap_language:-}"
         echo "Rede interna: ${nome_rede_interna:-}"
+        echo "Modo local: ${modo_local:-false}"
         ## A licença e os campos do Chatwoot ficam aqui porque uma retomada
         ## precisa reconstruir exatamente a mesma stack. Sem isso, retomar
         ## reinstalaria o FZAP como versão gratuita.
@@ -304,6 +313,7 @@ estado_restaurar_dados() {
     email_ssl=$(estado_ler "Email SSL")
     fzap_language=$(estado_ler "Idioma")
     nome_rede_interna=$(estado_ler "Rede interna")
+    [ "$(estado_ler "Modo local")" = "true" ] && modo_local=true
     licence_key=$(estado_ler "Licenca")
     chatwoot_identifier=$(estado_ler "Chatwoot identificador")
     chatwoot_system_name=$(estado_ler "Chatwoot nome")
@@ -606,6 +616,34 @@ recursos() {
     return 1
 }
 
+## Endereços exibidos e usados pelo instalador. Numa instalação local não há
+## domínio nem HTTPS: tudo passa por portas publicadas no próprio host.
+url_fzap_completa() {
+    if [ "$modo_local" = true ]; then
+        echo "http://localhost:${porta_fzap_local}"
+    else
+        echo "https://${url_fzap}"
+    fi
+}
+
+url_painel_completa() {
+    if [ "$modo_local" = true ]; then
+        echo "http://localhost:${porta_painel_local}"
+    else
+        echo "https://${1:-$url_portainer}"
+    fi
+}
+
+## Base usada nas chamadas à API do painel. No modo local fala direto com a
+## porta publicada; caso contrário passa pelo Traefik, no host público.
+painel_api_base() {
+    if [ "$modo_local" = true ]; then
+        echo "http://127.0.0.1:${porta_painel_local}"
+    else
+        echo "https://${1:-$url_portainer}"
+    fi
+}
+
 obter_ip_publico() {
     curl -fsS4 --max-time 10 https://ifconfig.me 2>/dev/null \
         || curl -fsS4 --max-time 10 https://api.ipify.org 2>/dev/null
@@ -675,6 +713,10 @@ mostrar_registro_dns() {
 }
 
 configurar_firewall_http_https() {
+    ## Numa instalação local o acesso vem da própria máquina: não há nada a
+    ## abrir no firewall, e abrir seria expor o painel sem HTTPS.
+    [ "$modo_local" = true ] && return 0
+
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi "Status: active"; then
         echo -e "$amarelo• Liberando portas 80/443 no UFW...$reset"
         ufw allow 80/tcp >/dev/null 2>&1
@@ -684,6 +726,32 @@ configurar_firewall_http_https() {
     fi
 }
 
+## As portas que a instalação precisa publicar, conforme o modo.
+porta_publicada_fzap() {
+    if [ "$modo_local" = true ]; then echo "$porta_fzap_local"; else echo 80; fi
+}
+
+porta_publicada_painel() {
+    if [ "$modo_local" = true ]; then echo "$porta_painel_local"; else echo 443; fi
+}
+
+## Devolve, separadas por espaço, as portas necessárias que já estão ocupadas.
+## Uma porta publicada pelo próprio Docker não conta: quem escuta ali somos nós.
+portas_em_uso() {
+    local ocupadas="" porta escutando
+
+    command -v ss >/dev/null 2>&1 || return 0
+    escutando=$(ss -ltnH 2>/dev/null | awk '{print $4}')
+
+    for porta in "$(porta_publicada_fzap)" "$(porta_publicada_painel)"; do
+        printf '%s\n' "$escutando" | grep -Eq "(^|:)${porta}\$" \
+            && ocupadas="$ocupadas $porta"
+    done
+    echo "$ocupadas"
+}
+
+## Usada apenas pelo fluxo do Traefik, no menu avançado: ali as portas são
+## sempre 80 e 443, independente de o instalador ter sido chamado com --local.
 validar_portas_http_https() {
     local portas_ocupadas=""
 
@@ -819,16 +887,64 @@ instalar_docker() {
     echo ""
 }
 
+## IP que o Swarm deve anunciar. Num servidor com mais de um endereço o Docker
+## se recusa a escolher sozinho, e é essa a falha mais comum do swarm init.
+ip_para_anunciar() {
+    local ip
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null \
+        | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+    [ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "$ip"
+}
+
+## Inicia o Swarm registrando o motivo real da falha no log técnico. A segunda
+## tentativa informa explicitamente o IP a anunciar; a terceira usa o loopback,
+## que basta para um nó único — inclusive numa instalação local.
+iniciar_swarm() {
+    local saida ip estado
+
+    if saida=$(docker swarm init 2>&1); then
+        return 0
+    fi
+    log_tecnico "docker swarm init falhou: $(printf '%s' "$saida" | tr '\n' ' ')"
+
+    estado=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
+    case "$estado" in
+        active) return 0 ;;
+        pending|locked)
+            echo -e "$vermelho  ✖ O Docker Swarm está em estado \"$estado\".$reset"
+            echo -e "$bege    Execute$reset$amarelo docker swarm leave --force$reset$bege e tente novamente.$reset"
+            return 1
+            ;;
+    esac
+
+    ip=$(ip_para_anunciar)
+    if [ -n "$ip" ]; then
+        if saida=$(docker swarm init --advertise-addr "$ip" 2>&1); then
+            log_tecnico "swarm iniciado anunciando $ip"
+            return 0
+        fi
+        log_tecnico "docker swarm init --advertise-addr $ip falhou: $(printf '%s' "$saida" | tr '\n' ' ')"
+    fi
+
+    if saida=$(docker swarm init --advertise-addr 127.0.0.1 2>&1); then
+        log_tecnico "swarm iniciado anunciando 127.0.0.1"
+        return 0
+    fi
+
+    log_tecnico "docker swarm init --advertise-addr 127.0.0.1 falhou: $(printf '%s' "$saida" | tr '\n' ' ')"
+    echo -e "$vermelho  ✖ Falha ao iniciar Docker Swarm$reset"
+    echo -e "$bege    $(printf '%s' "$saida" | head -1)$reset"
+    return 1
+}
+
 preparar_docker_swarm() {
     instalar_docker || return 1
 
     echo -e "$amarelo• Inicializando Docker Swarm...$reset"
     SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
     if [ "$SWARM_STATUS" != "active" ]; then
-        docker swarm init >/dev/null 2>&1 || {
-            echo -e "$vermelho  ✖ Falha ao iniciar Docker Swarm$reset"
-            return 1
-        }
+        iniciar_swarm || return 1
     fi
     echo -e "$verde  ✔ Swarm OK$reset"
     echo ""
@@ -964,6 +1080,39 @@ networks:
 EOF
 }
 
+## Publicação do painel. Local: porta no host. Produção: rótulos do Traefik.
+_bloco_exposicao_portainer() {
+    if [ "$modo_local" = true ]; then
+        cat << EOF
+    ports:
+      - target: 9000
+        published: ${porta_painel_local}
+        mode: host
+EOF
+        return 0
+    fi
+    return 1
+}
+
+_labels_portainer() {
+    if [ "$modo_local" = true ]; then
+        printf '      labels: []\n'
+        return 0
+    fi
+    cat << EOF
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
+        - traefik.http.routers.portainer.entrypoints=websecure
+        - traefik.http.routers.portainer.tls=true
+        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.portainer.service=portainer
+        - traefik.http.routers.portainer.priority=1
+        - traefik.http.services.portainer.loadbalancer.server.port=9000
+        - traefik.swarm.network=${nome_rede_interna}
+EOF
+}
+
 gerar_portainer_yaml() {
     cat > portainer.yaml << EOF
 version: "3.7"
@@ -993,22 +1142,14 @@ services:
       - portainer_data:/data
     networks:
       - ${nome_rede_interna}
+$(_bloco_exposicao_portainer)
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
           - node.role == manager
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.portainer.rule=Host(\`${url_portainer}\`)
-        - traefik.http.routers.portainer.entrypoints=websecure
-        - traefik.http.routers.portainer.tls=true
-        - traefik.http.routers.portainer.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.portainer.service=portainer
-        - traefik.http.routers.portainer.priority=1
-        - traefik.http.services.portainer.loadbalancer.server.port=9000
-        - traefik.swarm.network=${nome_rede_interna}
+$(_labels_portainer)
 
 volumes:
   portainer_data:
@@ -1062,7 +1203,7 @@ init_portainer_admin() {
         ## serviço pode ainda não estar aceitando conexões.
         preparar_acesso_portainer "$url_portainer" || true
 
-        AUTH_RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/auth" \
+        AUTH_RESPONSE=$(portainer_api -s -X POST "$(painel_api_base "$url_portainer")/api/auth" \
             -H "Content-Type: application/json" \
             --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
                 '{Username: $usuario, Password: $senha}')")
@@ -1080,13 +1221,13 @@ init_portainer_admin() {
             | grep -oE 'setup_token=[a-f0-9]{64}' | tail -1 | cut -d= -f2)
 
         if [ -n "$SETUP_TOKEN" ]; then
-            RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/users/admin/init" \
+            RESPONSE=$(portainer_api -s -X POST "$(painel_api_base "$url_portainer")/api/users/admin/init" \
                 -H "Content-Type: application/json" \
                 -H "X-Setup-Token: $SETUP_TOKEN" \
                 --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
                     '{Username: $usuario, Password: $senha}')")
         else
-            RESPONSE=$(portainer_api -s -X POST "https://$url_portainer/api/users/admin/init" \
+            RESPONSE=$(portainer_api -s -X POST "$(painel_api_base "$url_portainer")/api/users/admin/init" \
                 -H "Content-Type: application/json" \
                 --data "$(jq -n --arg usuario "$user_portainer" --arg senha "$pass_portainer" \
                     '{Username: $usuario, Password: $senha}')")
@@ -1221,6 +1362,17 @@ preparar_acesso_portainer() {
     local host="$1"
 
     portainer_resolve_args=()
+
+    ## No modo local o painel publica a própria porta: não há host a resolver.
+    if [ "$modo_local" = true ]; then
+        if curl -fsS --max-time 15 "$(painel_api_base)/api/status" >/dev/null 2>&1; then
+            log_tecnico "painel técnico alcançado em $(painel_api_base)"
+            return 0
+        fi
+        log_tecnico "painel técnico ainda não respondeu em $(painel_api_base)"
+        return 1
+    fi
+
     [ -n "$host" ] || return 1
 
     if curl -k -fsS --max-time 15 --resolve "${host}:443:127.0.0.1" \
@@ -1312,7 +1464,7 @@ obter_token_api_portainer() {
     ## Um token válido é reaproveitado: nenhuma execução cria um segundo token.
     if [ -n "$token_salvo" ] && portainer_api -fsS \
         -H "X-API-Key: $token_salvo" \
-        "https://$PORTAINER_URL/api/users/me" \
+        "$(painel_api_base "$PORTAINER_URL")/api/users/me" \
         | jq -e '.Id | numbers' >/dev/null 2>&1; then
         PORTAINER_API_KEY="$token_salvo"
         log_tecnico "token de automação existente reaproveitado"
@@ -1323,7 +1475,7 @@ obter_token_api_portainer() {
         -H "Content-Type: application/json" \
         --data "$(jq -n --arg usuario "$USUARIO" --arg senha "$SENHA" \
             '{username: $usuario, password: $senha}')" \
-        "https://$PORTAINER_URL/api/auth" \
+        "$(painel_api_base "$PORTAINER_URL")/api/auth" \
         | jq -r '.jwt // empty' 2>/dev/null) || true
 
     if [ -z "$jwt" ]; then
@@ -1334,7 +1486,7 @@ obter_token_api_portainer() {
 
     usuario_atual=$(portainer_api -fsS \
         -H "Authorization: Bearer $jwt" \
-        "https://$PORTAINER_URL/api/users/me" 2>/dev/null) || true
+        "$(painel_api_base "$PORTAINER_URL")/api/users/me" 2>/dev/null) || true
     usuario_id=$(echo "$usuario_atual" | jq -r '.Id // empty' 2>/dev/null)
     if [ -z "$usuario_id" ]; then
         echo -e "$vermelho  ✖ Não foi possível identificar o usuário do painel técnico.$reset"
@@ -1346,7 +1498,7 @@ obter_token_api_portainer() {
         -H "Content-Type: application/json" \
         --data "$(jq -n --arg descricao "FZAP Installer" --arg senha "$SENHA" \
             '{description: $descricao, password: $senha}')" \
-        "https://$PORTAINER_URL/api/users/$usuario_id/tokens" 2>/dev/null) || true
+        "$(painel_api_base "$PORTAINER_URL")/api/users/$usuario_id/tokens" 2>/dev/null) || true
     jwt=""
 
     PORTAINER_API_KEY=$(echo "$resposta_token" \
@@ -1384,7 +1536,7 @@ deploy() {
 
     ENDPOINT_ID=$(portainer_api -s -X GET \
         -H "X-API-Key: $PORTAINER_API_KEY" \
-        "https://$PORTAINER_URL/api/endpoints" \
+        "$(painel_api_base "$PORTAINER_URL")/api/endpoints" \
         | jq -r '.[] | select(.Name == "primary") | .Id' 2>/dev/null)
     if [ -z "$ENDPOINT_ID" ]; then
         item_falha "Não foi possível falar com o painel técnico."
@@ -1395,7 +1547,7 @@ deploy() {
 
     SWARM_ID=$(portainer_api -s -X GET \
         -H "X-API-Key: $PORTAINER_API_KEY" \
-        "https://$PORTAINER_URL/api/endpoints/$ENDPOINT_ID/docker/swarm" \
+        "$(painel_api_base "$PORTAINER_URL")/api/endpoints/$ENDPOINT_ID/docker/swarm" \
         | jq -r .ID 2>/dev/null)
     log_tecnico "swarm id obtido para o endpoint $ENDPOINT_ID"
 
@@ -1407,7 +1559,7 @@ deploy() {
 
     stack_id=$(portainer_api -s -X GET \
         -H "X-API-Key: $PORTAINER_API_KEY" \
-        "https://$PORTAINER_URL/api/stacks" \
+        "$(painel_api_base "$PORTAINER_URL")/api/stacks" \
         | jq -r --arg nome "$STACK_NAME" \
             '.[] | select(.Name == $nome) | .Id' 2>/dev/null | head -1)
 
@@ -1420,7 +1572,7 @@ deploy() {
             -H "Content-Type: application/json" \
             --data "$(jq -n --rawfile conteudo "${STACK_NAME}.yaml" \
                 '{StackFileContent: $conteudo, Env: [], Prune: true}')" \
-            "https://$PORTAINER_URL/api/stacks/$stack_id?endpointId=$ENDPOINT_ID" 2>/dev/null)
+            "$(painel_api_base "$PORTAINER_URL")/api/stacks/$stack_id?endpointId=$ENDPOINT_ID" 2>/dev/null)
     else
         log_tecnico "stack $STACK_NAME não existe: criando via POST"
         http_code=$(portainer_api -s -o "$response_output" -w "%{http_code}" -X POST \
@@ -1429,7 +1581,7 @@ deploy() {
             -F "file=@$(pwd)/${STACK_NAME}.yaml" \
             -F "SwarmID=$SWARM_ID" \
             -F "endpointId=$ENDPOINT_ID" \
-            "https://$PORTAINER_URL/api/stacks/create/swarm/file" 2>/dev/null)
+            "$(painel_api_base "$PORTAINER_URL")/api/stacks/create/swarm/file" 2>/dev/null)
     fi
 
     response_body=$(cat "$response_output")
@@ -1476,6 +1628,17 @@ _tem_portainer() {
 
 _tem_traefik() {
     docker ps -a --format "{{.Names}}" 2>/dev/null | grep -qi "traefik"
+}
+
+## O que conta como infraestrutura já preparada depende do modo: uma instalação
+## local não tem Traefik, e exigi-lo faria o instalador reinstalar tudo a cada
+## execução.
+_infra_pronta() {
+    if [ "$modo_local" = true ]; then
+        _tem_portainer
+    else
+        _tem_traefik && _tem_portainer
+    fi
 }
 
 _usar_existentes() {
@@ -1549,6 +1712,9 @@ _usar_existentes() {
 }
 
 _instalar_apenas_traefik() {
+    ## Este fluxo instala Traefik e Portainer com domínio e HTTPS. O modo local
+    ## não se aplica aqui, mesmo que o instalador tenha sido chamado com --local.
+    local modo_local=false
     clear
     nome_traefik_portainer
     preencha_as_info
@@ -1794,6 +1960,9 @@ verificar_infraestrutura_existente() {
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
 ferramenta_traefik_e_portainer() {
+    ## Este fluxo instala Traefik e Portainer com domínio e HTTPS. O modo local
+    ## não se aplica aqui, mesmo que o instalador tenha sido chamado com --local.
+    local modo_local=false
     local continuar_para_fzap="${1:-false}"
 
     recursos 1 1 && return
@@ -2082,6 +2251,34 @@ networks:
 EOF
 }
 
+## Publicação do FZAP. Local: porta no host. Produção: rótulos do Traefik.
+_bloco_exposicao_fzap() {
+    [ "$modo_local" = true ] || return 0
+    cat << EOF
+    ports:
+      - target: 8080
+        published: ${porta_fzap_local}
+        mode: host
+EOF
+}
+
+_labels_fzap() {
+    if [ "$modo_local" = true ]; then
+        printf '      labels: []\n'
+        return 0
+    fi
+    cat << EOF
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.fzap.rule=Host(\`${url_fzap}\`)
+        - traefik.http.routers.fzap.entrypoints=websecure
+        - traefik.http.routers.fzap.tls=true
+        - traefik.http.routers.fzap.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.fzap.service=fzap
+        - traefik.http.services.fzap.loadbalancer.server.port=8080
+EOF
+}
+
 gerar_fzap_yaml() {
     local line_chatwoot_identifier
     local line_chatwoot_system_name
@@ -2121,6 +2318,7 @@ services:
     image: dncarbonell/fzap:latest
     networks:
       - ${nome_rede_interna}
+$(_bloco_exposicao_fzap)
     volumes:
       - fzap_app_dbdata:/app/dbdata
       - fzap_files:/app/files
@@ -2130,7 +2328,7 @@ services:
       # --- Configurações Gerais e Sistema ---
       - TZ=America/Sao_Paulo
       - FZAP_LANGUAGE=${fzap_language}
-      - PUBLIC_BASE_URL=https://${url_fzap}
+      - PUBLIC_BASE_URL=$(url_fzap_completa)
       #- LOG_LEVEL=info
       #- LOG_CALLER=false
       #- GLOBAL_PROXY_URL=
@@ -2219,14 +2417,7 @@ ${line_chatwoot_service_url}
         limits:
           cpus: "1"
           memory: 1024M
-      labels:
-        - traefik.enable=true
-        - traefik.http.routers.fzap.rule=Host(\`${url_fzap}\`)
-        - traefik.http.routers.fzap.entrypoints=websecure
-        - traefik.http.routers.fzap.tls=true
-        - traefik.http.routers.fzap.tls.certresolver=letsencryptresolver
-        - traefik.http.routers.fzap.service=fzap
-        - traefik.http.services.fzap.loadbalancer.server.port=8080
+$(_labels_fzap)
 
 volumes:
   fzap_app_dbdata:
@@ -2398,19 +2589,26 @@ etapa1_verificar_servidor() {
             item_pendente "$(rotulo_valor "Modo cluster" "será configurado")"
         fi
 
-        portas_ocupadas=""
-        if command -v ss >/dev/null 2>&1; then
-            ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)80$' && portas_ocupadas="$portas_ocupadas 80"
-            ss -ltnH 2>/dev/null | awk '{print $4}' | grep -Eq '(^|:)443$' && portas_ocupadas="$portas_ocupadas 443"
-        fi
-        if [ -n "$portas_ocupadas" ] && ! _tem_traefik; then
+        ## O modo local não usa Traefik: as portas que importam são as que o
+        ## FZAP e o painel publicam direto no host.
+        portas_ocupadas=$(portas_em_uso)
+        if [ "$modo_local" = true ]; then
+            if [ -n "$portas_ocupadas" ]; then
+                item_falha "$(rotulo_valor "Portas ${porta_fzap_local} e ${porta_painel_local}" "em uso por outro programa:$portas_ocupadas")"
+                atencao=true
+            else
+                item_ok "$(rotulo_valor "Portas ${porta_fzap_local} e ${porta_painel_local}" "disponíveis")"
+            fi
+        elif [ -n "$portas_ocupadas" ] && ! _tem_traefik; then
             item_falha "$(rotulo_valor "Portas 80 e 443" "em uso por outro programa:$portas_ocupadas")"
             atencao=true
         else
             item_ok "$(rotulo_valor "Portas 80 e 443" "disponíveis")"
         fi
 
-        if _tem_traefik && _tem_portainer; then
+        if [ "$modo_local" = true ]; then
+            item_pendente "$(rotulo_valor "Preparação do servidor" "modo local, sem HTTPS")"
+        elif _tem_traefik && _tem_portainer; then
             item_ok "$(rotulo_valor "Preparação do servidor" "já feita")"
         elif _tem_traefik || _tem_portainer; then
             item_atencao "$(rotulo_valor "Preparação do servidor" "incompleta")"
@@ -2429,12 +2627,19 @@ etapa1_verificar_servidor() {
             return 0
         fi
 
-        if [ -n "$portas_ocupadas" ] && ! _tem_traefik; then
-            echo -e "$bege As portas 80 e 443 são usadas para publicar o FZAP na internet e$reset"
-            echo -e "$bege para emitir o certificado HTTPS. Elas precisam estar livres.$reset"
+        if [ -n "$portas_ocupadas" ] && { [ "$modo_local" = true ] || ! _tem_traefik; }; then
+            if [ "$modo_local" = true ]; then
+                echo -e "$bege As portas ${porta_fzap_local} e ${porta_painel_local} são usadas para publicar o FZAP e o$reset"
+                echo -e "$bege painel neste computador. Elas precisam estar livres.$reset"
+            else
+                echo -e "$bege As portas 80 e 443 são usadas para publicar o FZAP na internet e$reset"
+                echo -e "$bege para emitir o certificado HTTPS. Elas precisam estar livres.$reset"
+            fi
             echo ""
             echo -e " Programa que as ocupa hoje:"
-            ss -ltnpH 2>/dev/null | awk '$4 ~ /(^|:)(80|443)$/ {print "   " $4 "  " $6}' | head -5
+            ss -ltnpH 2>/dev/null \
+                | awk -v p1="$(porta_publicada_fzap)" -v p2="$(porta_publicada_painel)" \
+                    '$4 ~ "(^|:)(" p1 "|" p2 ")$" {print "   " $4 "  " $6}' | head -5
             echo ""
         fi
 
@@ -2547,32 +2752,109 @@ perguntar_enderecos_explicitos() {
     echo ""
 }
 
+## Detecta se este computador tem cara de máquina local em vez de servidor
+## exposto. Nenhum sinal isolado é conclusivo, então o resultado só muda a
+## recomendação da tela: quem quiser um domínio continua podendo escolhê-lo.
+##   0 = provavelmente local
+##   1 = provavelmente um servidor com IP público
+motivo_ambiente_local=""
+parece_ambiente_local() {
+    local ip_local ip_externo
+
+    motivo_ambiente_local=""
+
+    ## WSL e containers de desktop nunca recebem tráfego da internet.
+    if grep -qi "microsoft" /proc/version 2>/dev/null; then
+        motivo_ambiente_local="este sistema roda no WSL"
+        return 0
+    fi
+
+    ip_externo=$(ip_publico)
+    ip_local=$(ip_para_anunciar)
+
+    ## Sem saída para a internet não há como emitir certificado.
+    if [ -z "$ip_externo" ]; then
+        motivo_ambiente_local="este computador não tem IP público acessível"
+        return 0
+    fi
+
+    ## IP local privado e diferente do IP visto de fora significa NAT: o
+    ## endereço público pertence ao roteador, não a esta máquina.
+    if [ -n "$ip_local" ] && [ "$ip_local" != "$ip_externo" ] \
+        && [[ "$ip_local" =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.) ]]; then
+        motivo_ambiente_local="este computador está atrás de NAT (IP local $ip_local)"
+        return 0
+    fi
+
+    return 1
+}
+
+## Numa instalação local não há endereço a escolher nem DNS a verificar: os
+## valores existem apenas para nomear as stacks e o arquivo de credenciais.
+configurar_enderecos_locais() {
+    dominio_base=""
+    url_fzap="localhost"
+    url_portainer="localhost"
+    painel_reaproveitado=false
+    log_tecnico "modo local ativado (fzap:${porta_fzap_local} painel:${porta_painel_local})"
+}
+
 ## Quem tem um domínio livre aceita as sugestões; quem já apontou subdomínios
 ## informa cada endereço.
 escolher_modo_enderecos() {
     local escolha
+    local local_provavel=false
+
+    parece_ambiente_local && local_provavel=true
 
     while true; do
         echo -e "$branco Como você quer definir os endereços?$reset"
         echo ""
-        echo -e " $amarelo[1]$reset Tenho um domínio e quero as sugestões — recomendado"
-        echo -e "$bege     O instalador usa fzap. para o FZAP e painel. para o painel.$reset"
-        echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
-        echo -e "$bege     Você informa cada endereço, com o nome que quiser.$reset"
+
+        ## A recomendação segue o ambiente detectado; as opções são as mesmas.
+        if [ "$local_provavel" = true ]; then
+            echo -e "$bege Detectamos que ${motivo_ambiente_local}, então um domínio$reset"
+            echo -e "$bege público provavelmente não vai funcionar aqui.$reset"
+            echo ""
+            echo -e " $amarelo[1]$reset Tenho um domínio e quero as sugestões"
+            echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
+            echo -e " $amarelo[3]$reset Instalar localmente, sem domínio — recomendado"
+            echo -e "$bege     Acesso por http://localhost:${porta_fzap_local}, sem HTTPS.$reset"
+        else
+            echo -e " $amarelo[1]$reset Tenho um domínio e quero as sugestões — recomendado"
+            echo -e "$bege     O instalador usa fzap. para o FZAP e painel. para o painel.$reset"
+            echo -e " $amarelo[2]$reset Já tenho endereços apontados para este servidor"
+            echo -e "$bege     Você informa cada endereço, com o nome que quiser.$reset"
+            echo -e " $amarelo[3]$reset Instalar localmente, sem domínio"
+            echo -e "$bege     Acesso por http://localhost:${porta_fzap_local}, sem HTTPS. Para testes.$reset"
+        fi
+
         echo ""
         echo -e " $amarelo[0]$reset Sair"
         echo ""
         ler_entrada -p " Escolha: " escolha
         echo ""
 
+        ## Enter aceita a recomendação, seja ela qual for.
+        if [ -z "$escolha" ] && [ "$local_provavel" = true ]; then
+            escolha=3
+        fi
+
         case "$escolha" in
             ""|1)
+                modo_local=false
                 perguntar_dominio_base || return 1
                 derivar_enderecos
                 return 0
                 ;;
             2)
+                modo_local=false
                 perguntar_enderecos_explicitos
+                return 0
+                ;;
+            3)
+                modo_local=true
+                configurar_enderecos_locais
                 return 0
                 ;;
             0) return 1 ;;
@@ -2590,8 +2872,28 @@ etapa2_enderecos() {
 
     if [ "$forcar" = true ] || [ -z "$url_fzap" ]; then
         painel_reaproveitado=false
+        if [ "$modo_local" = true ] && [ "$forcar" != true ]; then
+            ## --local já respondeu a pergunta desta etapa.
+            configurar_enderecos_locais
+        else
+            titulo_etapa 2 "Endereços"
+            escolher_modo_enderecos || return 1
+        fi
+    fi
+
+    ## O modo local não depende de DNS: mostra o que será publicado e segue.
+    if [ "$modo_local" = true ]; then
         titulo_etapa 2 "Endereços"
-        escolher_modo_enderecos || return 1
+        item_ok "FZAP            $(url_fzap_completa)"
+        item_ok "Painel técnico  $(url_painel_completa)"
+        echo ""
+        echo -e "$bege Instalação local: sem domínio, sem HTTPS e sem certificado. O acesso$reset"
+        echo -e "$bege é só a partir deste computador.$reset"
+        echo ""
+        estado_gravar "dns_ok"
+        linha_fina
+        ler_entrada -p " Pressione ENTER para continuar: " escolha
+        return 0
     fi
 
     while true; do
@@ -2677,19 +2979,25 @@ etapa3_configurar() {
     while true; do
         titulo_etapa 3 "Confira antes de instalar"
 
-        echo -e " FZAP            $branco https://$url_fzap$reset"
+        echo -e " FZAP            $branco $(url_fzap_completa)$reset"
         if [ "$painel_reaproveitado" = true ]; then
-            echo -e " Painel técnico  $branco https://$url_portainer$reset$bege (já existente)$reset"
+            echo -e " Painel técnico  $branco $(url_painel_completa)$reset$bege (já existente)$reset"
         else
-            echo -e " Painel técnico  $branco https://$url_portainer$reset"
+            echo -e " Painel técnico  $branco $(url_painel_completa)$reset"
         fi
         echo -e " E-mail          $branco $email_ssl$reset"
         echo -e " Idioma          $branco $fzap_language$reset"
         echo -e " Licença         $branco ${licence_key:+informada}${licence_key:-versão gratuita}$reset"
         echo ""
-        echo -e "$bege O servidor será configurado automaticamente: HTTPS, rede interna,$reset"
-        echo -e "$bege banco de dados e painel técnico. A senha do painel e o token de$reset"
-        echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
+        if [ "$modo_local" = true ]; then
+            echo -e "$bege Instalação local: rede interna, banco de dados e painel técnico. Sem$reset"
+            echo -e "$bege HTTPS e sem acesso externo. A senha do painel e o token de$reset"
+            echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
+        else
+            echo -e "$bege O servidor será configurado automaticamente: HTTPS, rede interna,$reset"
+            echo -e "$bege banco de dados e painel técnico. A senha do painel e o token de$reset"
+            echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
+        fi
         echo ""
 
         linha_fina
@@ -2828,7 +3136,7 @@ instalar_aplicacao() {
     ## Uma retentativa por causa de DNS ou certificado não precisa reiniciar a
     ## aplicação. Um endereço diferente do que está no ar, sim.
     if stack_saudavel "fzap" \
-        && [ "$(recuperar_env_do_servico "fzap_fzap" "PUBLIC_BASE_URL")" = "https://${url_fzap}" ]; then
+        && [ "$(recuperar_env_do_servico "fzap_fzap" "PUBLIC_BASE_URL")" = "$(url_fzap_completa)" ]; then
         log_tecnico "stack fzap já saudável no endereço esperado: nada a fazer"
         return 0
     fi
@@ -2842,7 +3150,7 @@ instalar_aplicacao() {
 ## Prepara Traefik e Portainer sem fazer nenhuma pergunta: os dados já foram
 ## coletados nas etapas 2 e 3. Uma infraestrutura já existente é reutilizada.
 preparar_infraestrutura() {
-    if _tem_traefik && _tem_portainer; then
+    if _infra_pronta; then
         if [ ! -f "$dados_portainer_file" ] \
             || [ -z "$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")" ]; then
             log_tecnico "infraestrutura existente sem credenciais registradas"
@@ -2863,10 +3171,13 @@ preparar_infraestrutura() {
     pass_portainer=$(gerar_token 24)
 
     executar_passo "Dados do servidor salvos" salvar_dados_servidor || return 1
-    executar_passo "Portas 80 e 443 liberadas" configurar_firewall_http_https || return 1
     executar_passo "Docker preparado" preparar_docker_swarm || return 1
     executar_passo "Rede interna criada" criar_rede_interna || return 1
-    executar_passo "Acesso HTTPS configurado" deploy_traefik || return 1
+    ## Sem domínio não há certificado a emitir, e portanto não há Traefik.
+    if [ "$modo_local" != true ]; then
+        executar_passo "Portas 80 e 443 liberadas" configurar_firewall_http_https || return 1
+        executar_passo "Acesso HTTPS configurado" deploy_traefik || return 1
+    fi
     executar_passo "Painel técnico instalado" deploy_portainer || return 1
     executar_passo "Credenciais do painel salvas" salvar_dados_painel || return 1
     executar_passo "Conta do painel criada" init_portainer_admin || return 1
@@ -2883,8 +3194,10 @@ etapa4_instalar() {
     ## partir dele.
     cd "$home_directory" || return 1
 
-    if _tem_traefik && _tem_portainer; then
+    if _infra_pronta; then
         passos_total=5
+    elif [ "$modo_local" = true ]; then
+        passos_total=8
     else
         passos_total=10
     fi
@@ -2977,7 +3290,7 @@ etapa5_verificar() {
     if [ -n "$PORTAINER_API_KEY" ] \
         && preparar_acesso_portainer "$PORTAINER_URL" \
         && portainer_api -fsS -H "X-API-Key: $PORTAINER_API_KEY" \
-            "https://$PORTAINER_URL/api/users/me" | jq -e '.Id | numbers' >/dev/null 2>&1; then
+            "$(painel_api_base "$PORTAINER_URL")/api/users/me" | jq -e '.Id | numbers' >/dev/null 2>&1; then
         item_ok "Painel técnico respondendo"
     else
         item_atencao "Painel técnico ainda não confirmado"
@@ -2987,6 +3300,22 @@ etapa5_verificar() {
     ## instalação feita por uma versão anterior do instalador.
     if [ -z "$url_fzap" ]; then
         item_atencao "Endereço do FZAP não registrado neste servidor"
+        echo ""
+        return 1
+    fi
+
+    ## Sem HTTPS não há certificado a esperar: basta o endereço responder.
+    if [ "$modo_local" = true ]; then
+        for tentativa in 1 2 3 4 5 6; do
+            curl -fsS --max-time 10 -o /dev/null "$(url_fzap_completa)" 2>/dev/null && break
+            sleep 5
+        done
+        if curl -fsS --max-time 10 -o /dev/null "$(url_fzap_completa)" 2>/dev/null; then
+            item_ok "Endereço acessível"
+            echo ""
+            return 0
+        fi
+        item_atencao "O endereço ainda não responde"
         echo ""
         return 1
     fi
@@ -3021,7 +3350,7 @@ mostrar_credenciais_painel() {
     senha=$(ler_campo_arquivo "$dados_portainer_file" "Senha: ")
 
     echo -e "$branco Painel técnico$reset"
-    echo -e " Endereço  https://$url"
+    echo -e " Endereço  $(url_painel_completa "$url")"
     echo -e " Usuário   $user"
     echo -e " Senha     $senha"
     echo ""
@@ -3042,7 +3371,7 @@ tela_conclusao_sucesso() {
     echo -e "$verde FZAP instalado com sucesso$reset"
     echo ""
     echo -e "$branco Abra agora:$reset"
-    echo -e "$verde https://$url_fzap$reset"
+    echo -e "$verde $(url_fzap_completa)$reset"
     echo ""
     echo -e "$branco Próximo passo:$reset"
     echo -e " Abra o endereço acima e conecte seu WhatsApp."
@@ -3065,6 +3394,26 @@ tela_conclusao_parcial() {
     echo -e "$amarelo FZAP instalado — aguardando o endereço$reset"
     linha_fina
     echo ""
+    ## Numa instalação local não há DNS: se o endereço não respondeu, o serviço
+    ## ainda está subindo, e é isso que precisa ser dito.
+    if [ "$modo_local" = true ]; then
+        echo -e " Os serviços estão rodando, mas o endereço ainda não respondeu."
+        echo -e " Ele costuma ficar disponível em alguns instantes."
+        echo ""
+        echo -e "$branco Endereço:$reset $verde $(url_fzap_completa)$reset"
+        echo ""
+        echo -e "$branco Token de administrador$reset"
+        echo -e " $admin_token"
+        echo ""
+        mostrar_credenciais_painel
+        aviso_segredos_na_tela
+        linha_fina
+        echo -e " $amarelo[1]$reset Verificar agora"
+        echo -e " $amarelo[0]$reset Sair"
+        echo ""
+        return 0
+    fi
+
     echo -e " Os serviços estão rodando neste servidor. O endereço abaixo passa"
     echo -e " a funcionar sozinho assim que o DNS estiver pronto."
     echo ""
@@ -3083,7 +3432,7 @@ tela_conclusao_parcial() {
         echo ""
     fi
 
-    echo -e "$branco Depois:$reset $verde https://$url_fzap$reset"
+    echo -e "$branco Depois:$reset $verde $(url_fzap_completa)$reset"
     echo ""
     echo -e "$bege O idioma e a licença podem ser alterados depois no painel do FZAP.$reset"
     echo ""
@@ -3187,6 +3536,13 @@ reemitir_certificado() {
     echo -e "$branco Emitir o certificado HTTPS novamente$reset"
     linha_fina
     echo ""
+
+    if [ "$modo_local" = true ]; then
+        item_falha "Esta é uma instalação local: ela não usa HTTPS."
+        echo ""
+        ler_entrada -p " Pressione ENTER para voltar..."
+        return 1
+    fi
 
     if ! docker service ls --format "{{.Name}}" 2>/dev/null | grep -q "^traefik_traefik$"; then
         item_falha "O componente de HTTPS não está instalado neste servidor."
@@ -3297,7 +3653,7 @@ tela_ja_instalado() {
             estado_texto="fora do ar"
         fi
 
-        echo -e " Endereço  ${branco}https://${url_fzap}${reset}"
+        echo -e " Endereço  ${branco}$(url_fzap_completa)${reset}"
         echo -e " Status    ${estado_texto}"
         echo ""
 

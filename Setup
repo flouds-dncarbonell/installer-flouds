@@ -126,6 +126,55 @@ instalar_dependencias() {
     echo -e "$verde  ✔ Dependências instaladas$reset"
 }
 
+## IP que o Swarm deve anunciar. Numa VPS com mais de um endereço o Docker
+## se recusa a escolher sozinho, e é essa a falha mais comum do swarm init.
+ip_para_anunciar() {
+    local ip
+    ip=$(ip -4 route get 1.1.1.1 2>/dev/null \
+        | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+    [ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    echo "$ip"
+}
+
+## Inicia o Swarm mostrando o motivo real quando falha. A segunda tentativa
+## informa explicitamente o IP a anunciar; a terceira usa o loopback, que é o
+## suficiente para um nó único (inclusive numa instalação local).
+iniciar_swarm() {
+    local saida ip
+
+    if saida=$(docker swarm init 2>&1); then
+        return 0
+    fi
+
+    ## Um estado "pending" ou "locked" não se resolve repetindo o init.
+    case "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" in
+        active) return 0 ;;
+        pending|locked)
+            printf '%s\n' "$saida" >&2
+            echo -e "$amarelo O Docker Swarm ficou em estado inconsistente. Execute$reset" >&2
+            echo -e "$amarelo   docker swarm leave --force$reset" >&2
+            echo -e "$amarelo e rode o instalador novamente.$reset" >&2
+            return 1
+            ;;
+    esac
+
+    ip=$(ip_para_anunciar)
+    if [ -n "$ip" ]; then
+        echo -e "$amarelo Tentando novamente anunciando o IP $ip...$reset"
+        if saida=$(docker swarm init --advertise-addr "$ip" 2>&1); then
+            return 0
+        fi
+    fi
+
+    echo -e "$amarelo Tentando novamente em modo local (127.0.0.1)...$reset"
+    if docker swarm init --advertise-addr 127.0.0.1 >/dev/null 2>&1; then
+        return 0
+    fi
+
+    printf '%s\n' "$saida" >&2
+    return 1
+}
+
 ## Bootstrap carregado via curl; não redirecionar stdin aqui.
 
 clear
@@ -188,7 +237,7 @@ echo -e "$amarelo[3/3]$reset Verificando Docker Swarm..."
 SWARM_STATUS=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)
 if [ "$SWARM_STATUS" != "active" ]; then
     echo -e "$amarelo Iniciando Docker Swarm...$reset"
-    docker swarm init > /dev/null 2>&1 || falhar "Falha ao iniciar Docker Swarm."
+    iniciar_swarm || falhar "Falha ao iniciar Docker Swarm."
     echo -e "$verde  ✔ Swarm iniciado$reset"
 else
     echo -e "$verde  ✔ Docker Swarm já está ativo$reset"
