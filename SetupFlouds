@@ -64,8 +64,11 @@ fi
 ## mesmo e terminar sozinho. O redirecionamento não pode ser feito no script
 ## inteiro (o bash ainda precisa ler o resto do código pelo stdin), então cada
 ## pergunta lê de /dev/tty individualmente — é o que $entrada_tty indica.
+## O teste é abrir /dev/tty de fato: num processo sem terminal de controle o
+## arquivo existe e parece legível, mas a abertura falha. Só aqui o stderr é
+## silenciado, para que essa tentativa não deixe um erro cru na tela.
 entrada_tty=false
-if [ ! -t 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+if [ ! -t 0 ] && (exec </dev/tty) 2>/dev/null; then
     entrada_tty=true
 fi
 
@@ -2094,34 +2097,38 @@ ferramenta_traefik_e_portainer() {
 ## Um read que falha significa entrada encerrada — terminal não interativo, ou
 ## /dev/tty indisponível num curl|bash. Sem esta guarda, todo laço de pergunta
 ## giraria para sempre consumindo CPU em vez de terminar com uma mensagem.
-## Mesma leitura de ler_entrada, para senhas: não ecoa o que é digitado.
-ler_senha() {
-    local ok=0
-
-    if [ "$entrada_tty" = true ]; then
-        read -rs "$@" 2>/dev/null </dev/tty || ok=1
-    else
-        read -rs "$@" || ok=1
-    fi
-    echo ""
-
-    if [ "$ok" -ne 0 ]; then
-        echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
-        exit 1
-    fi
-}
-
+##
+## O prompt de "read -p" é escrito em STDERR, e não em stdout: suprimir stderr
+## aqui apagaria toda pergunta da tela. Por isso as leituras abaixo nunca
+## redirecionam o descritor 2.
 ler_entrada() {
     local ok=0
 
     if [ "$entrada_tty" = true ]; then
-        read -r "$@" 2>/dev/null </dev/tty || ok=1
+        read -r "$@" </dev/tty || ok=1
     else
         read -r "$@" || ok=1
     fi
 
     if [ "$ok" -ne 0 ]; then
         echo ""
+        echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
+        exit 1
+    fi
+}
+
+## Mesma leitura, para senhas: não ecoa o que é digitado.
+ler_senha() {
+    local ok=0
+
+    if [ "$entrada_tty" = true ]; then
+        read -rs "$@" </dev/tty || ok=1
+    else
+        read -rs "$@" || ok=1
+    fi
+    echo ""
+
+    if [ "$ok" -ne 0 ]; then
         echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
         exit 1
     fi
