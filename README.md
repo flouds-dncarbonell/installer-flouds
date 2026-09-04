@@ -10,12 +10,15 @@ Instalador automatizado do **FZAP** — plataforma de automação WhatsApp desen
 - Acesso **root**
 - Mínimo **2 vCPUs** e **2 GB RAM** (4 GB recomendado)
 - Porta **80** e **443** liberadas no firewall
-- Um domínio próprio. Na etapa de endereços o instalador oferece dois caminhos:
+- Um domínio próprio. Na etapa de endereços o instalador oferece três caminhos:
   informar apenas o domínio-base (por exemplo `empresa.com.br`) e aceitar
-  as sugestões `fzap.` e `painel.`, ou informar endereços já apontados para o
-  servidor, com qualquer nome (por exemplo `app.empresa.com.br`). Se o
-  DNS ainda não estiver pronto, é possível instalar antes e criar os registros
-  depois.
+  as sugestões `fzap.` e `painel.`; informar endereços já apontados para o
+  servidor, com qualquer nome (por exemplo `app.empresa.com.br`); ou instalar
+  localmente, sem domínio nenhum. Se o DNS ainda não estiver pronto, é possível
+  instalar antes e criar os registros depois.
+
+A instalação local dispensa o domínio, as portas 80/443 e o firewall: veja
+[Instalação local](#instalação-local).
 
 Na primeira instalação, o próprio instalador configura:
 
@@ -48,8 +51,8 @@ etapas e pede apenas o domínio, o e-mail do certificado, o idioma e a licença:
 
 1. **Verificar o servidor** — sistema, recursos, Docker, portas 80/443 e
    instalação anterior
-2. **Endereços** — endereços sugeridos a partir do domínio-base ou informados
-   um a um, com conferência do DNS
+2. **Endereços** — endereços sugeridos a partir do domínio-base, informados
+   um a um (com conferência do DNS), ou instalação local sem domínio
 3. **Configurar o FZAP** — e-mail, idioma e licença, com confirmação final
 4. **Instalar** — HTTPS, painel técnico, banco de dados e FZAP
 5. **Verificar e concluir** — réplicas, certificado e endereço, antes de
@@ -65,6 +68,29 @@ após verificar cada etapa. Ao ser executado de novo, ele oferece continuar de
 onde parou; nenhuma rede, volume, stack ou token válido é recriado. Se o FZAP já
 estiver instalado, a tela inicial mostra o endereço e o status em vez de um erro.
 
+#### Se o Docker Swarm não iniciar
+
+O instalador ativa o modo cluster do Docker (Swarm) antes de instalar qualquer
+coisa. Quando isso falha, ele mostra a mensagem original do Docker — é ela que
+diz o que houve. As duas causas mais comuns:
+
+- **`could not choose an IP address to advertise`** — o servidor tem mais de um
+  endereço e o Docker não escolhe sozinho. O instalador já tenta de novo com o
+  IP da rota padrão e, por último, com `127.0.0.1`. Para resolver manualmente:
+
+  ```bash
+  docker swarm init --advertise-addr <IP-do-servidor>
+  ```
+
+- **Swarm em estado `pending` ou `locked`** — sobrou de uma tentativa anterior.
+  Repetir o init não resolve; é preciso sair do cluster antes:
+
+  ```bash
+  docker swarm leave --force
+  ```
+
+  Depois execute o instalador novamente.
+
 #### Detalhes técnicos
 
 O caminho comum não mostra jargão. Os detalhes ficam em
@@ -75,8 +101,40 @@ exibidos na tela com:
 ./SetupFlouds --verbose
 ```
 
-Outras opções: `--infra-only` instala apenas Traefik e Portainer, e `NO_COLOR=1`
-desativa as cores sem perder nenhuma informação.
+Outras opções: `--infra-only` instala apenas Traefik e Portainer, `--local`
+instala em localhost (veja abaixo) e `NO_COLOR=1` desativa as cores sem perder
+nenhuma informação.
+
+#### Instalação local
+
+Para testar o FZAP numa máquina que não tem domínio nem IP público — um
+notebook, uma VM de desenvolvimento, uma VPS atrás de NAT — escolha a opção
+**Instalar localmente, sem domínio** na etapa de endereços, ou execute o
+instalador com `--local`:
+
+```bash
+./SetupFlouds --local
+```
+
+Nesse modo o FZAP e o painel técnico publicam portas direto no host, sem
+Traefik e sem HTTPS:
+
+| Serviço | Endereço |
+|---|---|
+| FZAP | `http://localhost:8080` |
+| Painel técnico (Portainer) | `http://localhost:9000` |
+
+O instalador pula a verificação de DNS, a emissão do certificado e a liberação
+de portas no firewall — o acesso é só a partir da própria máquina. A etapa 1
+verifica as portas **8080** e **9000** em vez de 80 e 443.
+
+Quando o ambiente parece local (WSL, ausência de IP público alcançável, ou IP
+privado atrás de NAT), o instalador detecta a situação e já recomenda esse modo
+na etapa de endereços. As três opções continuam disponíveis: a detecção só muda
+qual delas vem sugerida.
+
+Uma instalação local **não é adequada para produção**: sem HTTPS, os webhooks
+do WhatsApp não conseguem alcançar o servidor de fora.
 
 ### Coolify
 
@@ -133,11 +191,13 @@ O Fzap é uma aplicação que roda em container Docker e oferece:
 
 ## Stack
 
-A stack do Fzap usa Docker Swarm com Traefik para SSL automático. As principais variáveis de ambiente configuradas durante a instalação:
+A stack do Fzap usa Docker Swarm com Traefik para SSL automático — exceto na
+instalação local, que dispensa o Traefik e publica as portas direto no host. As
+principais variáveis de ambiente configuradas durante a instalação:
 
 | Variável | Descrição |
 |---|---|
-| `PUBLIC_BASE_URL` | URL completa onde o Fzap está acessível |
+| `PUBLIC_BASE_URL` | URL completa onde o Fzap está acessível (`http://localhost:8080` no modo local) |
 | `FZAP_LANGUAGE` | Idioma: `pt-BR`, `en-US`, `es-LATAM` |
 | `ADMIN_TOKEN` | Token de autenticação da API |
 | `FLOUDS_LICENCE_KEY` | Chave de licença (vazio = versão free) |
