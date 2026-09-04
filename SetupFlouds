@@ -5,13 +5,14 @@
 ##     Estrutura inspirada no SetupOrion: https://github.com/oriondesign2015/SetupOrion
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
 
-versao="1.4.2"
+versao="1.5.0"
 traefik_image="traefik:v3.6.17"
 portainer_image="portainer/portainer-ce:2.39.5"
 portainer_agent_image="portainer/agent:2.39.5"
 rede_padrao="proxy"
 modo_infra=false
 modo_verbose=false
+fluxo_instalacao="completo"
 
 ## Instalação sem domínio: sem Traefik e sem HTTPS. Numa VPS usa o IP público;
 ## em máquinas locais usa localhost. O FZAP e o painel publicam portas no host.
@@ -268,6 +269,7 @@ estado_gravar() {
         echo "Versao do instalador: $versao"
         echo "Etapa concluida: $etapa"
         echo "Situacao: $situacao"
+        echo "Fluxo de instalacao: ${fluxo_instalacao:-completo}"
         echo "Dominio base: ${dominio_base:-}"
         echo "Dominio fzap: ${url_fzap:-}"
         echo "Dominio painel: ${url_portainer:-}"
@@ -318,12 +320,15 @@ estado_alcancou() {
 
 ## Recarrega no ambiente os dados já confirmados em uma execução anterior.
 estado_restaurar_dados() {
+    fluxo_instalacao=$(estado_ler "Fluxo de instalacao")
+    [ -n "$fluxo_instalacao" ] || fluxo_instalacao="completo"
     dominio_base=$(estado_ler "Dominio base")
     url_fzap=$(estado_ler "Dominio fzap")
     url_portainer=$(estado_ler "Dominio painel")
     email_ssl=$(estado_ler "Email SSL")
     fzap_language=$(estado_ler "Idioma")
     nome_rede_interna=$(estado_ler "Rede interna")
+    modo_local=false
     [ "$(estado_ler "Modo local")" = "true" ] && modo_local=true
     licence_key=$(estado_ler "Licenca")
     chatwoot_identifier=$(estado_ler "Chatwoot identificador")
@@ -3124,7 +3129,13 @@ etapa3_configurar() {
         echo -e " Idioma          $branco $fzap_language$reset"
         echo -e " Licença         $branco ${licence_key:+informada}${licence_key:-versão gratuita}$reset"
         echo ""
-        if [ "$modo_local" = true ]; then
+        if [ "$fluxo_instalacao" = "etapas" ]; then
+            echo -e "$bege Primeiro prepararemos e validaremos a infraestrutura. Depois você poderá$reset"
+            echo -e "$bege instalar o FZAP imediatamente ou voltar ao menu sem perder estes dados.$reset"
+            if [ "$modo_local" = true ]; then
+                echo -e "$bege Como não há domínio, o acesso será por HTTP em $(url_fzap_completa).$reset"
+            fi
+        elif [ "$modo_local" = true ]; then
             echo -e "$bege Instalação sem domínio: rede interna, banco de dados e painel técnico.$reset"
             echo -e "$bege O acesso será por HTTP em $(url_fzap_completa). A senha do painel e o token de$reset"
             echo -e "$bege administrador são gerados agora e mostrados no final.$reset"
@@ -3136,7 +3147,11 @@ etapa3_configurar() {
         echo ""
 
         linha_fina
-        echo -e " $amarelo[1]$reset Instalar — recomendado"
+        if [ "$fluxo_instalacao" = "etapas" ]; then
+            echo -e " $amarelo[1]$reset Preparar a infraestrutura — recomendado"
+        else
+            echo -e " $amarelo[1]$reset Instalar tudo — recomendado"
+        fi
         echo -e " $amarelo[2]$reset Corrigir alguma informação"
         echo -e " $amarelo[0]$reset Cancelar"
         echo ""
@@ -3321,27 +3336,20 @@ preparar_infraestrutura() {
     return 0
 }
 
-etapa4_instalar() {
-    local resultado
-
-    titulo_etapa 4 "Instalando"
-    passo_atual=0
-
-    ## Os arquivos das stacks são gerados no diretório de dados e enviados a
-    ## partir dele.
-    cd "$home_directory" || return 1
-
+quantidade_passos_infraestrutura() {
     if _infra_pronta; then
-        passos_total=5
+        echo 3
+    elif [ "$modo_local" = true ] && [ "${url_fzap:-localhost}" = "localhost" ]; then
+        echo 6
     elif [ "$modo_local" = true ]; then
-        if [ "${url_fzap:-localhost}" = "localhost" ]; then passos_total=8; else passos_total=9; fi
+        echo 7
     else
-        passos_total=10
+        echo 8
     fi
+}
 
-    echo -e "$bege Isso leva de 2 a 5 minutos. Detalhes técnicos em$reset"
-    echo -e "$bege $log_file$reset"
-    echo ""
+instalar_bloco_infraestrutura() {
+    local resultado
 
     preparar_infraestrutura
     resultado=$?
@@ -3358,7 +3366,10 @@ etapa4_instalar() {
     [ "$resultado" -eq 0 ] || return 1
 
     estado_gravar "infra_pronta"
+    return 0
+}
 
+instalar_bloco_fzap() {
     ## As credenciais da aplicação só são geradas quando a instalação começa —
     ## e apenas se ainda não existirem de uma execução anterior.
     restaurar_segredos_existentes
@@ -3372,6 +3383,142 @@ etapa4_instalar() {
     estado_gravar "fzap_saudavel"
 
     return 0
+}
+
+etapa4_instalar() {
+    titulo_etapa 4 "Instalando tudo"
+    passo_atual=0
+    passos_total=$(($(quantidade_passos_infraestrutura) + 2))
+
+    ## Os arquivos das stacks são gerados no diretório de dados e enviados a
+    ## partir dele.
+    cd "$home_directory" || return 1
+
+    echo -e "$bege Isso leva de 2 a 5 minutos. Detalhes técnicos em$reset"
+    echo -e "$bege $log_file$reset"
+    echo ""
+
+    instalar_bloco_infraestrutura || return 1
+    instalar_bloco_fzap || return 1
+}
+
+etapa4_instalar_so_infraestrutura() {
+    titulo_etapa 4 "Preparando a infraestrutura"
+    passo_atual=0
+    passos_total=$(quantidade_passos_infraestrutura)
+
+    cd "$home_directory" || return 1
+
+    echo -e "$bege Nesta etapa instalaremos Docker, rede, painel técnico e,$reset"
+    echo -e "$bege quando houver domínio, o acesso HTTPS.$reset"
+    echo -e "$bege Detalhes técnicos em $log_file$reset"
+    echo ""
+
+    instalar_bloco_infraestrutura
+}
+
+etapa4_instalar_so_fzap() {
+    titulo_etapa 4 "Instalando banco de dados e FZAP"
+    passo_atual=0
+    passos_total=2
+
+    cd "$home_directory" || return 1
+
+    echo -e "$bege A infraestrutura pronta será reaproveitada.$reset"
+    echo -e "$bege Detalhes técnicos em $log_file$reset"
+    echo ""
+
+    instalar_bloco_fzap
+}
+
+## Verifica apenas o bloco de infraestrutura. Retorna 1 quando os serviços
+## estão de pé, mas o HTTPS ainda depende de DNS/certificado, e 2 em falha.
+verificar_infraestrutura_instalada() {
+    local falhou=false
+
+    titulo_etapa 4 "Verificando a infraestrutura"
+
+    if stack_saudavel "portainer"; then
+        item_ok "Painel técnico em execução"
+    else
+        item_falha "Painel técnico não iniciou"
+        falhou=true
+    fi
+
+    if [ "$modo_local" != true ]; then
+        if stack_saudavel "traefik"; then
+            item_ok "Componente de HTTPS em execução"
+        else
+            item_falha "Componente de HTTPS não iniciou"
+            falhou=true
+        fi
+    fi
+
+    if [ "$falhou" = true ]; then
+        echo ""
+        return 2
+    fi
+
+    PORTAINER_URL="$url_portainer"
+    if preparar_acesso_portainer "$PORTAINER_URL"; then
+        item_ok "Painel técnico respondendo"
+    else
+        item_falha "Painel técnico ainda não responde"
+        echo ""
+        return 2
+    fi
+
+    if [ "$modo_local" = true ]; then
+        item_ok "Infraestrutura pronta para instalar o FZAP"
+        echo ""
+        return 0
+    fi
+
+    if certificado_valido "$url_portainer"; then
+        item_ok "Certificado HTTPS válido"
+        item_ok "Infraestrutura pronta para instalar o FZAP"
+        echo ""
+        return 0
+    fi
+
+    item_atencao "Infraestrutura instalada; HTTPS ainda aguarda DNS ou certificado"
+    echo -e "$bege O FZAP pode ser instalado agora, mas o endereço seguro só ficará$reset"
+    echo -e "$bege disponível quando o DNS apontar para esta VPS e o certificado for emitido.$reset"
+    echo ""
+    return 1
+}
+
+## Retorna 0 para continuar com o FZAP e 1 para encerrar a jornada por etapas.
+decidir_depois_da_infraestrutura() {
+    local escolha
+    local resultado
+
+    while true; do
+        verificar_infraestrutura_instalada
+        resultado=$?
+
+        linha_fina
+        if [ "$resultado" -eq 0 ]; then
+            echo -e " $amarelo[1]$reset Instalar o FZAP agora — recomendado"
+            echo -e " $amarelo[0]$reset Voltar ao menu"
+        elif [ "$resultado" -eq 1 ]; then
+            echo -e " $amarelo[1]$reset Verificar novamente — recomendado"
+            echo -e " $amarelo[2]$reset Instalar o FZAP mesmo assim"
+            echo -e " $amarelo[0]$reset Voltar ao menu"
+        else
+            echo -e " $amarelo[1]$reset Verificar novamente"
+            echo -e " $amarelo[0]$reset Voltar ao menu"
+        fi
+        echo ""
+        ler_entrada -p " Escolha: " escolha
+
+        case "$resultado:$escolha" in
+            0:1|1:2) return 0 ;;
+            1:1|2:1) ;;
+            *:0) return 1 ;;
+            *) ;;
+        esac
+    done
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
@@ -3886,7 +4033,11 @@ tratar_falha() {
 jornada_instalar_fzap() {
     local resultado
     local escolha
+    local fluxo_solicitado="${1:-completo}"
+    local situacao_inicial
+    local pausa_depois_da_infra=false
 
+    fluxo_instalacao="$fluxo_solicitado"
     dominio_base=""
     url_fzap=""
     url_portainer=""
@@ -3910,7 +4061,17 @@ jornada_instalar_fzap() {
         return 0
     fi
 
-    tela_retomar || return 0
+    situacao_inicial=$(estado_ler "Situacao")
+    if [ "$situacao_inicial" = "aguardando_fzap" ]; then
+        estado_restaurar_dados
+        ## A opção escolhida no menu atual decide se haverá nova pausa. Os dados
+        ## e a infraestrutura preparada continuam sendo reaproveitados.
+        fluxo_instalacao="$fluxo_solicitado"
+        retomando=true
+        pausa_depois_da_infra=true
+    else
+        tela_retomar || return 0
+    fi
 
     if [ "$retomando" != true ]; then
         etapa1_verificar_servidor || return 0
@@ -3928,9 +4089,33 @@ jornada_instalar_fzap() {
     ## trabalho sem pedir nenhum dado de novo, porque as respostas continuam em
     ## memória e cada etapa é idempotente.
     while true; do
-        if ! etapa4_instalar; then
-            tratar_falha && continue
-            return 0
+        if [ "$fluxo_instalacao" = "etapas" ]; then
+            if ! estado_alcancou "infra_pronta"; then
+                if ! etapa4_instalar_so_infraestrutura; then
+                    tratar_falha && continue
+                    return 0
+                fi
+                estado_gravar "infra_pronta" "aguardando_fzap"
+                pausa_depois_da_infra=true
+            fi
+
+            if [ "$pausa_depois_da_infra" = true ]; then
+                if ! decidir_depois_da_infraestrutura; then
+                    estado_gravar "infra_pronta" "aguardando_fzap"
+                    return 0
+                fi
+                pausa_depois_da_infra=false
+            fi
+
+            if ! etapa4_instalar_so_fzap; then
+                tratar_falha && continue
+                return 0
+            fi
+        else
+            if ! etapa4_instalar; then
+                tratar_falha && continue
+                return 0
+            fi
         fi
 
         etapa5_verificar
@@ -3967,6 +4152,33 @@ jornada_instalar_fzap() {
     done
 }
 
+menu_opcoes_avancadas() {
+    local escolha
+
+    while true; do
+        clear
+        echo ""
+        echo -e "$branco Opções avançadas$reset"
+        linha_fina
+        echo ""
+        echo -e " $amarelo[1]$reset Preparar ou reaproveitar a infraestrutura"
+        echo -e "$bege     Instala Traefik e Portainer, ou completa o componente ausente.$reset"
+        echo -e " $amarelo[2]$reset Manutenção e diagnóstico"
+        echo -e "$bege     Credenciais, certificado, reinício do painel, logs e diagnóstico.$reset"
+        echo ""
+        echo -e " $amarelo[0]$reset Voltar"
+        echo ""
+        ler_entrada -p " Escolha: " escolha
+
+        case "$escolha" in
+            1) ferramenta_traefik_e_portainer ;;
+            2) estado_restaurar_dados; menu_manutencao ;;
+            0) return 0 ;;
+            *) ;;
+        esac
+    done
+}
+
 ## Cabeçalho curto do menu. A arte grande aparece apenas na abertura e na
 ## conclusão, para não empurrar o conteúdo fora da tela a cada volta.
 menu_instalador() {
@@ -3975,9 +4187,18 @@ menu_instalador() {
     echo -e "$branco Flouds Installer$reset$bege   v$versao$reset"
     linha_fina
     echo ""
-    echo -e " $amarelo[1]$reset Instalar o FZAP neste servidor — recomendado"
-    echo -e " $amarelo[2]$reset Configurações avançadas"
-    echo -e " $amarelo[3]$reset Manutenção e diagnóstico"
+    if [ "$(estado_ler "Situacao")" = "aguardando_fzap" ]; then
+        item_ok "Infraestrutura instalada"
+        item_pendente "FZAP aguardando instalação"
+        echo ""
+    fi
+    echo -e " $amarelo[1]$reset Instalação completa — recomendada"
+    echo -e "$bege     Prepara o servidor e instala o FZAP em um único fluxo.$reset"
+    echo -e " $amarelo[2]$reset Instalar por etapas"
+    echo -e "$bege     Prepara e valida a infraestrutura antes de instalar o FZAP.$reset"
+    echo -e " $amarelo[3]$reset Opções avançadas"
+    echo -e "$bege     Reaproveitamento, componentes isolados e configurações técnicas.$reset"
+    echo -e " $amarelo[4]$reset Manutenção e diagnóstico"
     echo ""
     echo -e " $amarelo[0]$reset Sair"
     echo ""
@@ -3999,7 +4220,7 @@ cd /root || exit 1
 nome_instalador
 
 linha_fina
-echo -e "$branco Instale o FZAP e deixe-o acessível com HTTPS.$reset"
+echo -e "$branco Instale o FZAP com domínio, IP público ou apenas localmente.$reset"
 echo -e "$bege O instalador prepara automaticamente tudo o que for necessário:$reset"
 echo -e "$bege endereços, certificado, banco de dados e painel técnico.$reset"
 linha_fina
@@ -4024,15 +4245,19 @@ while true; do
 
     case $opcao in
 
-        1|fzap|FZAP)
-            jornada_instalar_fzap
+        1|completo|completa|fzap|FZAP)
+            jornada_instalar_fzap completo
             ;;
 
-        2|avancado|avançado|traefik|portainer)
-            ferramenta_traefik_e_portainer
+        2|etapas)
+            jornada_instalar_fzap etapas
             ;;
 
-        3|manutencao|manutenção)
+        3|avancado|avançado|traefik|portainer)
+            menu_opcoes_avancadas
+            ;;
+
+        4|manutencao|manutenção)
             estado_restaurar_dados
             menu_manutencao
             ;;

@@ -46,19 +46,34 @@ Execute o comando abaixo no terminal do servidor como **root**:
 curl -fsSL https://raw.githubusercontent.com/flouds-dncarbonell/installer-flouds/main/Setup | sudo bash
 ```
 
-No menu, escolha **Instalar FZAP neste servidor**. A instalação tem cinco
-etapas e pede apenas o domínio, o e-mail do certificado, o idioma e a licença:
+O menu principal oferece dois caminhos para a instalação padrão:
+
+- **Instalação completa — recomendada:** prepara o servidor, instala a
+  infraestrutura, o banco de dados e o FZAP em um único fluxo.
+- **Instalar por etapas:** coleta as mesmas informações, prepara primeiro o
+  Portainer e, quando houver domínio, o Traefik; depois permite validar a
+  infraestrutura antes de continuar.
+
+Os dois caminhos produzem a mesma instalação e pedem os mesmos dados. A
+diferença é apenas a pausa entre infraestrutura e aplicação. A jornada tem
+cinco etapas:
 
 1. **Verificar o servidor** — sistema, recursos, Docker, portas 80/443 e
    instalação anterior
 2. **Endereços** — endereços sugeridos a partir do domínio-base, informados
    um a um (com conferência do DNS), ou instalação sem domínio
 3. **Configurar o FZAP** — e-mail, idioma e licença, com confirmação final
-4. **Instalar** — HTTPS, painel técnico, banco de dados e FZAP
+4. **Instalar** — infraestrutura e aplicação juntas, ou em dois blocos
 5. **Verificar e concluir** — réplicas, certificado e endereço, antes de
    declarar sucesso
 
-As configurações de infraestrutura ficam separadas em **Configurações
+No fluxo por etapas, depois de instalar a infraestrutura, o instalador verifica
+o Portainer e o certificado HTTPS quando aplicável. É possível verificar de
+novo, instalar o FZAP mesmo com DNS/certificado pendente ou voltar ao menu. Ao
+voltar, todas as respostas ficam salvas e a próxima execução retoma diretamente
+da instalação do FZAP.
+
+As ações de reaproveitamento e instalação isolada ficam em **Opções
 avançadas**, e as ações de suporte em **Manutenção e diagnóstico**.
 
 #### Interrupções e reexecução
