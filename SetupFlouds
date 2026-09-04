@@ -3724,7 +3724,12 @@ tela_retomar() {
 
     etapa=$(estado_ler "Etapa concluida")
     [ -n "$etapa" ] || return 0
-    [ "$(estado_ler "Situacao")" = "em_andamento" ] || return 0
+    ## "falhou" também é uma execução interrompida: é exatamente o caso em que
+    ## a tela de falha prometeu que o instalador retomaria de onde parou.
+    case "$(estado_ler "Situacao")" in
+        em_andamento|falhou) ;;
+        *) return 0 ;;
+    esac
 
     clear
     echo ""
