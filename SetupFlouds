@@ -59,9 +59,14 @@ else
     reset="\e[0m"
 fi
 
-## Garante leitura interativa quando o script for executado a partir de um bootstrap via pipe
-if [ ! -t 0 ] && [ -r /dev/tty ] && [ -f "$0" ]; then
-    exec </dev/tty
+## Descobre por onde as perguntas devem ser lidas. Num curl | bash o stdin do
+## script é o próprio código-fonte: ler dali faria o instalador responder a si
+## mesmo e terminar sozinho. O redirecionamento não pode ser feito no script
+## inteiro (o bash ainda precisa ler o resto do código pelo stdin), então cada
+## pergunta lê de /dev/tty individualmente — é o que $entrada_tty indica.
+entrada_tty=false
+if [ ! -t 0 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    entrada_tty=true
 fi
 
 ## Diretório de dados
@@ -608,7 +613,7 @@ recursos() {
         echo -e " Disponível: $amarelo${vcpu_disp} vCPU$reset e $amarelo${ram_disp}GB RAM$reset"
         echo ""
         echo -e " Deseja continuar mesmo assim? (y/n): "
-        read -r escolha
+        ler_entrada escolha
         if [ "$escolha" != "y" ] && [ "$escolha" != "Y" ]; then
             return 0
         fi
@@ -816,7 +821,7 @@ validar_dominio_para_ssl() {
         echo -e " Para SSL automático, o domínio precisa chegar nesta VPS pelas portas 80 e 443."
         echo -e " Se você usa proxy como Cloudflare, pode continuar desde que ele esteja apontando para esta VPS."
         echo ""
-        read -rp "Deseja continuar mesmo assim? (Y/N): " confirmar_dns
+        ler_entrada -p "Deseja continuar mesmo assim? (Y/N): " confirmar_dns
         [ "$confirmar_dns" = "Y" ] || [ "$confirmar_dns" = "y" ] || return 1
     fi
 
@@ -1410,7 +1415,7 @@ criar_arquivo_portainer() {
 
     while true; do
         echo -e "$amarelo Passo 1/3$reset"
-        read -rp "URL do Portainer (ex: portainer.seudominio.com.br): " PORTAINER_URL
+        ler_entrada -p "URL do Portainer (ex: portainer.seudominio.com.br): " PORTAINER_URL
         PORTAINER_URL=$(normalizar_dominio "$PORTAINER_URL")
         validar_dominio "$PORTAINER_URL" && break
         echo ""
@@ -1419,7 +1424,7 @@ criar_arquivo_portainer() {
 
     while true; do
         echo -e "$amarelo Passo 2/3$reset"
-        read -rp "Usuário do Portainer (ex: admin): " USUARIO
+        ler_entrada -p "Usuário do Portainer (ex: admin): " USUARIO
         validar_usuario_portainer "$USUARIO" && break
         echo ""
     done
@@ -1428,8 +1433,7 @@ criar_arquivo_portainer() {
     while true; do
         echo -e "$amarelo Passo 3/3$reset"
         echo -e "$branco Obs: A senha não aparecerá ao digitar$reset"
-        read -rs -p "Senha do Portainer: " SENHA
-        echo ""
+        ler_senha -p "Senha do Portainer: " SENHA
         validar_senha "$SENHA" 12 && break
         echo ""
     done
@@ -1606,7 +1610,7 @@ requisitar_outra_instalacao() {
     echo -e "$amarelo=                                                                                                  =$reset"
     echo -e "$amarelo====================================================================================================$reset"
     echo ""
-    read -rp "Resposta: " continuar
+    ler_entrada -p "Resposta: " continuar
     if [ "$continuar" = "Y" ] || [ "$continuar" = "y" ]; then
         return
     else
@@ -1654,15 +1658,15 @@ _usar_existentes() {
 
     while true; do
         echo -e "$amarelo Passo 1/3$reset"
-        echo -en "$amarelo Domínio do Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo -en "$amarelo Domínio do Portainer (ex: portainer.seudominio.com): $reset" && ler_entrada url_portainer
         echo ""
 
         echo -e "$amarelo Passo 2/3$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && ler_entrada nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 3/3$reset"
-        echo -en "$amarelo E-mail SSL configurado no Traefik: $reset" && read -r email_ssl
+        echo -en "$amarelo E-mail SSL configurado no Traefik: $reset" && ler_entrada email_ssl
         echo ""
 
         url_portainer=$(normalizar_dominio "$url_portainer")
@@ -1680,7 +1684,7 @@ _usar_existentes() {
         echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
         echo ""
 
-        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        ler_entrada -p "As informações estão corretas? (Y/N): " confirmacao
         [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
 
         clear
@@ -1721,15 +1725,15 @@ _instalar_apenas_traefik() {
 
     while true; do
         echo -e "$amarelo Passo 1/3$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && ler_entrada nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 2/3$reset"
-        echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && read -r email_ssl
+        echo -en "$amarelo E-mail para certificado SSL (ex: contato@seudominio.com): $reset" && ler_entrada email_ssl
         echo ""
 
         echo -e "$amarelo Passo 3/3$reset"
-        echo -en "$amarelo Domínio do Portainer existente (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo -en "$amarelo Domínio do Portainer existente (ex: portainer.seudominio.com): $reset" && ler_entrada url_portainer
         echo ""
 
         url_portainer=$(normalizar_dominio "$url_portainer")
@@ -1747,7 +1751,7 @@ _instalar_apenas_traefik() {
         echo -e "$amarelo Domínio do Portainer:$branco $url_portainer$reset"
         echo ""
 
-        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        ler_entrada -p "As informações estão corretas? (Y/N): " confirmacao
         [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
 
         clear
@@ -1795,28 +1799,28 @@ _instalar_apenas_portainer() {
 
     while true; do
         echo -e "$amarelo Passo 1/5$reset"
-        echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && read -r url_portainer
+        echo -en "$amarelo Digite o domínio para o Portainer (ex: portainer.seudominio.com): $reset" && ler_entrada url_portainer
         echo ""
 
         echo -e "$amarelo Passo 2/5$reset"
-        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && read -r user_portainer
+        echo -en "$amarelo Digite um usuário para o Portainer (ex: admin): $reset" && ler_entrada user_portainer
         echo ""
 
         while true; do
             echo -e "$amarelo Passo 3/5$reset"
             echo -e "$bege --> Mínimo 12 caracteres$reset"
-            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && read -rs pass_portainer
+            echo -en "$amarelo Digite uma senha para o Portainer: $reset" && ler_senha pass_portainer
             echo ""
             validar_senha "$pass_portainer" 12 && break
         done
 
         echo -e "$amarelo Passo 4/5$reset"
         echo -e "$bege --> Deve ser a mesma rede que o Traefik existente usa$reset"
-        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && read -r nome_rede_interna
+        echo -en "$amarelo Nome da rede interna Docker (ex: proxy): $reset" && ler_entrada nome_rede_interna
         echo ""
 
         echo -e "$amarelo Passo 5/5$reset"
-        echo -en "$amarelo E-mail para certificado SSL: $reset" && read -r email_ssl
+        echo -en "$amarelo E-mail para certificado SSL: $reset" && ler_entrada email_ssl
         echo ""
 
         url_portainer=$(normalizar_dominio "$url_portainer")
@@ -1837,7 +1841,7 @@ _instalar_apenas_portainer() {
         echo -e "$amarelo E-mail SSL:$branco $email_ssl$reset"
         echo ""
 
-        read -rp "As informações estão corretas? (Y/N): " confirmacao
+        ler_entrada -p "As informações estão corretas? (Y/N): " confirmacao
         [ "$confirmacao" = "Y" ] || [ "$confirmacao" = "y" ] && break
 
         clear
@@ -1909,7 +1913,7 @@ verificar_infraestrutura_existente() {
         echo -e " $amarelo[2]$reset Reinstalar do zero"
         echo -e " $amarelo[3]$reset Reiniciar Portainer"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
         case "$escolha" in
             1) _usar_existentes; return 1 ;;
             2) return 0 ;;
@@ -1927,7 +1931,7 @@ verificar_infraestrutura_existente() {
         echo -e " $amarelo[2]$reset Reinstalar tudo do zero (remova o Portainer manualmente antes)"
         echo -e " $amarelo[3]$reset Reiniciar Portainer"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
         case "$escolha" in
             1) _instalar_apenas_traefik; return 1 ;;
             2) return 0 ;;
@@ -1944,7 +1948,7 @@ verificar_infraestrutura_existente() {
         echo -e " $amarelo[1]$reset Instalar apenas o Portainer"
         echo -e " $amarelo[2]$reset Reinstalar tudo do zero (remova o Traefik manualmente antes)"
         echo ""
-        read -rp " Escolha: " escolha
+        ler_entrada -p " Escolha: " escolha
         case "$escolha" in
             1) _instalar_apenas_portainer; return 1 ;;
             2) return 0 ;;
@@ -1982,12 +1986,12 @@ ferramenta_traefik_e_portainer() {
 
         echo -e "$amarelo Passo 1/2$reset"
         echo -e "$bege Este é o endereço do painel técnico usado para administrar o FZAP.$reset"
-        echo -en "$amarelo Endereço do painel (ex: painel.seudominio.com): $reset" && read -r url_portainer
+        echo -en "$amarelo Endereço do painel (ex: painel.seudominio.com): $reset" && ler_entrada url_portainer
         echo ""
 
         echo -e "$amarelo Passo 2/2$reset"
         echo -e "$bege Usaremos este e-mail nos avisos do certificado HTTPS.$reset"
-        echo -en "$amarelo E-mail (ex: contato@seudominio.com): $reset" && read -r email_ssl
+        echo -en "$amarelo E-mail (ex: contato@seudominio.com): $reset" && ler_entrada email_ssl
         echo ""
 
         url_portainer=$(normalizar_dominio "$url_portainer")
@@ -2009,7 +2013,7 @@ ferramenta_traefik_e_portainer() {
         echo -e "$amarelo Rede interna:$branco configurada automaticamente$reset"
         echo ""
 
-        read -rp "Continuar com a preparação do servidor? [S/n]: " confirmacao
+        ler_entrada -p "Continuar com a preparação do servidor? [S/n]: " confirmacao
         [ -z "$confirmacao" ] || [ "$confirmacao" = "S" ] || [ "$confirmacao" = "s" ] && break
 
         clear
@@ -2076,7 +2080,7 @@ ferramenta_traefik_e_portainer() {
     echo ""
     echo -e "$bege As credenciais também foram salvas em /root/dados_vps.$reset"
     echo ""
-    read -rp "Pressione ENTER para voltar ao menu..."
+    ler_entrada -p "Pressione ENTER para voltar ao menu..." _
 }
 
 ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## // ## //
@@ -2090,8 +2094,33 @@ ferramenta_traefik_e_portainer() {
 ## Um read que falha significa entrada encerrada — terminal não interativo, ou
 ## /dev/tty indisponível num curl|bash. Sem esta guarda, todo laço de pergunta
 ## giraria para sempre consumindo CPU em vez de terminar com uma mensagem.
+## Mesma leitura de ler_entrada, para senhas: não ecoa o que é digitado.
+ler_senha() {
+    local ok=0
+
+    if [ "$entrada_tty" = true ]; then
+        read -rs "$@" 2>/dev/null </dev/tty || ok=1
+    else
+        read -rs "$@" || ok=1
+    fi
+    echo ""
+
+    if [ "$ok" -ne 0 ]; then
+        echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
+        exit 1
+    fi
+}
+
 ler_entrada() {
-    if ! read -r "$@"; then
+    local ok=0
+
+    if [ "$entrada_tty" = true ]; then
+        read -r "$@" 2>/dev/null </dev/tty || ok=1
+    else
+        read -r "$@" || ok=1
+    fi
+
+    if [ "$ok" -ne 0 ]; then
         echo ""
         echo -e "$vermelho Entrada encerrada. Execute o instalador em um terminal interativo.$reset"
         exit 1
@@ -3874,7 +3903,7 @@ while true; do
 
     menu_instalador
 
-    if ! read -rp " Escolha: " opcao; then
+    if ! ler_entrada -p " Escolha: " opcao; then
         echo ""
         echo -e "$vermelho Não foi possível ler a opção. Execute o instalador em um terminal interativo.$reset"
         exit 1
